@@ -1,0 +1,6 @@
+.env
+node_modules/
+auth/
+auth-backup-20260304/
+data/
+logs/

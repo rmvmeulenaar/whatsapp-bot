@@ -1,0 +1,413 @@
+<!DOCTYPE html>
+<html lang="nl">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Molty Watch Mode Dashboard</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: #f8f9fa; color: #333; }
+    header { background: #1a1a2e; color: white; padding: 12px 20px; display: flex; align-items: center; justify-content: space-between; }
+    header h1 { font-size: 18px; font-weight: 600; }
+    .status { font-size: 12px; color: #aaa; }
+    .status.connected { color: #4caf50; }
+    .stats { background: white; padding: 12px 20px; border-bottom: 1px solid #e0e0e0; display: flex; gap: 20px; flex-wrap: wrap; }
+    .stat { text-align: center; }
+    .stat-value { font-size: 22px; font-weight: bold; }
+    .stat-label { font-size: 11px; color: #666; text-transform: uppercase; }
+    .groen-val { color: #28a745; }
+    .geel-val { color: #ffc107; }
+    .rood-val { color: #dc3545; }
+    .filters { background: white; padding: 10px 20px; border-bottom: 1px solid #e0e0e0; display: flex; gap: 10px; flex-wrap: wrap; align-items: center; }
+    .filters label { font-size: 12px; color: #666; }
+    .filters select, .filters input { padding: 4px 8px; border: 1px solid #ddd; border-radius: 4px; font-size: 13px; }
+    .banner { display: none; background: #fff3cd; border: 1px solid #ffc107; padding: 8px 20px; font-size: 13px; color: #856404; }
+    .banner.show { display: block; }
+    .table-wrapper { overflow-x: auto; }
+    table { width: 100%; border-collapse: collapse; font-size: 13px; }
+    thead { background: #343a40; color: white; position: sticky; top: 0; }
+    thead th { padding: 10px 8px; text-align: left; font-weight: 500; white-space: nowrap; }
+    tbody tr { border-bottom: 1px solid #e0e0e0; }
+    tbody tr:hover { background: #f5f5f5; }
+    td { padding: 8px 8px; vertical-align: top; }
+    .time { font-family: monospace; font-size: 11px; color: #666; white-space: nowrap; }
+    .jid { font-family: monospace; font-size: 11px; color: #555; }
+    .intent-badge { display: inline-block; padding: 2px 8px; border-radius: 10px; font-size: 11px; font-weight: 600; }
+    .intent-qa { background: #d4edda; color: #155724; }
+    .intent-booking { background: #fff3cd; color: #856404; }
+    .intent-escalation { background: #f8d7da; color: #721c24; }
+    .intent-error { background: #e2e3e5; color: #383d41; }
+    .class-badge { display: inline-block; padding: 2px 8px; border-radius: 10px; font-size: 11px; font-weight: 600; }
+    .class-GROEN { background: #d4edda; color: #155724; border-left: 3px solid #28a745; }
+    .class-GEEL { background: #fff3cd; color: #856404; border-left: 3px solid #ffc107; }
+    .class-ROOD { background: #f8d7da; color: #721c24; border-left: 3px solid #dc3545; }
+    .text-cell { max-width: 200px; cursor: pointer; }
+    .text-cell .short { display: block; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .text-cell .full { display: none; white-space: pre-wrap; word-break: break-word; }
+    .text-cell.expanded .short { display: none; }
+    .text-cell.expanded .full { display: block; }
+    .safety-pass { color: #28a745; font-weight: 600; font-size: 12px; }
+    .safety-fail { color: #dc3545; font-weight: 600; font-size: 12px; }
+    .safety-reason { font-size: 11px; color: #666; display: block; }
+    .action-badge { display: inline-block; padding: 2px 8px; border-radius: 10px; font-size: 11px; font-weight: 600; }
+    .action-watch_log_only { background: #e9ecef; color: #666; }
+    .action-sent { background: #d4edda; color: #155724; }
+    .action-guardrail_blocked { background: #f8d7da; color: #721c24; }
+    .action-send_failed { background: #fff3cd; color: #856404; }
+    .action-watch { background: #e9ecef; color: #666; }
+    .latency { font-family: monospace; font-size: 12px; }
+    .latency.fast { color: #28a745; }
+    .latency.medium { color: #ffc107; }
+    .latency.slow { color: #dc3545; }
+    .feedback-btns { display: flex; gap: 4px; align-items: center; }
+    .fb-btn { padding: 3px 8px; border: 1px solid #ddd; border-radius: 4px; cursor: pointer; font-size: 14px; background: white; }
+    .fb-btn:hover { background: #f0f0f0; }
+    .fb-btn.active-good { background: #d4edda; border-color: #28a745; }
+    .fb-btn.active-bad { background: #f8d7da; border-color: #dc3545; }
+    .correction-area { margin-top: 4px; display: none; }
+    .correction-area textarea { width: 100%; padding: 4px; font-size: 12px; border: 1px solid #ddd; border-radius: 4px; resize: vertical; min-height: 40px; }
+    .correction-area button { margin-top: 2px; padding: 2px 8px; font-size: 11px; background: #007bff; color: white; border: none; border-radius: 4px; cursor: pointer; }
+    .model-cell { font-size: 11px; color: #666; max-width: 120px; word-break: break-all; }
+    tr.row-groen { border-left: 3px solid #28a745; }
+    tr.row-geel { border-left: 3px solid #ffc107; }
+    tr.row-rood { border-left: 3px solid #dc3545; }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>Molty Watch Mode Dashboard</h1>
+    <span class="status" id="status">Verbinden...</span>
+  </header>
+
+  <div class="stats">
+    <div class="stat"><div class="stat-value" id="total">0</div><div class="stat-label">Totaal</div></div>
+    <div class="stat"><div class="stat-value groen-val" id="groen-count">0</div><div class="stat-label">GROEN</div></div>
+    <div class="stat"><div class="stat-value geel-val" id="geel-count">0</div><div class="stat-label">GEEL</div></div>
+    <div class="stat"><div class="stat-value rood-val" id="rood-count">0</div><div class="stat-label">ROOD</div></div>
+    <div class="stat"><div class="stat-value" id="avg-latency">-</div><div class="stat-label">Avg Latency</div></div>
+    <div class="stat"><div class="stat-value" id="safety-pass-pct">-</div><div class="stat-label">Safety Pass</div></div>
+  </div>
+
+  <div class="filters">
+    <label>Intent: <select id="filter-intent" onchange="applyFilters()">
+      <option value="">Alle</option>
+      <option value="qa">Q&A</option>
+      <option value="booking">Booking</option>
+      <option value="escalation">Escalation</option>
+    </select></label>
+    <label>Classificatie: <select id="filter-class" onchange="applyFilters()">
+      <option value="">Alle</option>
+      <option value="GROEN">GROEN</option>
+      <option value="GEEL">GEEL</option>
+      <option value="ROOD">ROOD</option>
+    </select></label>
+    <label>Safety: <select id="filter-safety" onchange="applyFilters()">
+      <option value="">Alle</option>
+      <option value="1">Pass</option>
+      <option value="0">Fail</option>
+    </select></label>
+    <label>JID: <input type="text" id="filter-jid" placeholder="Filter op JID..." oninput="applyFilters()"></label>
+  </div>
+
+  <div class="banner" id="banner">Verbinding verbroken. Herverbinden...</div>
+
+  <!-- Pending Suggestions Section -- BOVENAAN, boven watch entries tabel -->
+  <div id="pending-section" style="margin: 16px 20px 8px 20px; display: none;">
+    <h2 style="color: #f59e0b; font-size: 1.1em; margin-bottom: 12px; font-weight: 600;">Wachten op goedkeuring (<span id="pending-count">0</span>)</h2>
+    <div id="pending-list"></div>
+  </div>
+
+  <div class="table-wrapper">
+    <table id="entries-table">
+      <thead>
+        <tr>
+          <th>Tijd</th>
+          <th>JID</th>
+          <th>Intent</th>
+          <th>Inbound bericht</th>
+          <th>Classificatie</th>
+          <th>Voorgesteld antwoord</th>
+          <th>Safety</th>
+          <th>Model</th>
+          <th>Latency</th>
+          <th>Actie</th>
+          <th>Feedback</th>
+        </tr>
+      </thead>
+      <tbody id="entries-body"></tbody>
+    </table>
+  </div>
+
+  <script>
+    let allEntries = [];
+    let stats = { total: 0, groen: 0, geel: 0, rood: 0, latencies: [], safetyPass: 0 };
+
+    function formatTime(ts) {
+      try {
+        const d = new Date(ts);
+        return d.toLocaleTimeString('nl-NL', { hour12: false });
+      } catch { return ts; }
+    }
+
+    function getLatencyClass(ms) {
+      if (!ms || ms === 0) return '';
+      if (ms < 1500) return 'fast';
+      if (ms < 3000) return 'medium';
+      return 'slow';
+    }
+
+    function createRow(entry) {
+      const tr = document.createElement('tr');
+      const cls = entry.inbound_classification || entry.classification || 'GROEN';
+      tr.className = 'row-' + cls.toLowerCase();
+      tr.dataset.id = entry.id;
+      tr.dataset.intent = entry.intent || '';
+      tr.dataset.class = cls;
+      tr.dataset.safety = String(entry.safety_pass);
+      tr.dataset.jid = entry.jid || '';
+
+      const inboundShort = (entry.inbound || '').slice(0, 80);
+      const inboundFull = entry.inbound || '';
+      const replyShort = (entry.proposed_reply || '').slice(0, 100);
+      const replyFull = entry.proposed_reply || '(geen antwoord)';
+      const latencyMs = entry.latency_ms || 0;
+      const safetyPass = entry.safety_pass === 1;
+      const model = (entry.model || '').split('/').pop() || '-';
+
+      tr.innerHTML = `
+        <td class="time">${formatTime(entry.ts)}</td>
+        <td class="jid">${entry.jid || '-'}</td>
+        <td><span class="intent-badge intent-${entry.intent || 'error'}">${entry.intent || '-'}</span></td>
+        <td class="text-cell" onclick="this.classList.toggle('expanded')">
+          <span class="short">${escHtml(inboundShort)}${inboundFull.length > 80 ? '...' : ''}</span>
+          <span class="full">${escHtml(inboundFull)}</span>
+        </td>
+        <td><span class="class-badge class-${cls}">${cls}</span></td>
+        <td class="text-cell" onclick="this.classList.toggle('expanded')">
+          <span class="short">${escHtml(replyShort)}${replyFull.length > 100 ? '...' : ''}</span>
+          <span class="full">${escHtml(replyFull)}</span>
+        </td>
+        <td>
+          <span class="${safetyPass ? 'safety-pass' : 'safety-fail'}">${safetyPass ? 'Pass' : 'Fail'}</span>
+          ${entry.safety_reason ? '<span class="safety-reason">' + escHtml(entry.safety_reason) + '</span>' : ''}
+        </td>
+        <td class="model-cell">${escHtml(model)}</td>
+        <td><span class="latency ${getLatencyClass(latencyMs)}">${latencyMs > 0 ? latencyMs + 'ms' : '-'}</span></td>
+        <td><span class="action-badge action-${entry.action || 'watch'}">${entry.action || '-'}</span></td>
+        <td>
+          <div class="feedback-btns">
+            <button class="fb-btn ${entry.feedback === 'good' ? 'active-good' : ''}" onclick="submitFeedback(${entry.id || 0}, 'good', this)" title="Goed">+1</button>
+            <button class="fb-btn ${entry.feedback === 'bad' ? 'active-bad' : ''}" onclick="toggleCorrection(${entry.id || 0}, this)" title="Slecht">-1</button>
+          </div>
+          <div class="correction-area" id="corr-${entry.id || 0}">
+            <textarea placeholder="Correctie (optioneel)..."></textarea>
+            <button onclick="submitCorrection(${entry.id || 0})">Opslaan</button>
+          </div>
+        </td>
+      `;
+      return tr;
+    }
+
+    function escHtml(str) {
+      if (!str) return '';
+      return String(str).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+    }
+
+    function updateStats() {
+      document.getElementById('total').textContent = stats.total;
+      document.getElementById('groen-count').textContent = stats.groen;
+      document.getElementById('geel-count').textContent = stats.geel;
+      document.getElementById('rood-count').textContent = stats.rood;
+      const validLat = stats.latencies.filter(l => l > 0);
+      const avg = validLat.length > 0 ? Math.round(validLat.reduce((a,b)=>a+b,0)/validLat.length) : 0;
+      document.getElementById('avg-latency').textContent = avg > 0 ? avg + 'ms' : '-';
+      const pct = stats.total > 0 ? Math.round((stats.safetyPass / stats.total) * 100) : 0;
+      document.getElementById('safety-pass-pct').textContent = stats.total > 0 ? pct + '%' : '-';
+    }
+
+    function addEntryToStats(entry) {
+      stats.total++;
+      const cls = entry.inbound_classification || entry.classification || 'GROEN';
+      if (cls === 'GROEN') stats.groen++;
+      else if (cls === 'GEEL') stats.geel++;
+      else if (cls === 'ROOD') stats.rood++;
+      if (entry.latency_ms > 0) stats.latencies.push(entry.latency_ms);
+      if (entry.safety_pass === 1) stats.safetyPass++;
+    }
+
+    function applyFilters() {
+      const intentFilter = document.getElementById('filter-intent').value;
+      const classFilter = document.getElementById('filter-class').value;
+      const safetyFilter = document.getElementById('filter-safety').value;
+      const jidFilter = document.getElementById('filter-jid').value.toLowerCase();
+
+      document.querySelectorAll('#entries-body tr').forEach(tr => {
+        let show = true;
+        if (intentFilter && tr.dataset.intent !== intentFilter) show = false;
+        if (classFilter && tr.dataset.class !== classFilter) show = false;
+        if (safetyFilter && tr.dataset.safety !== safetyFilter) show = false;
+        if (jidFilter && !tr.dataset.jid.toLowerCase().includes(jidFilter)) show = false;
+        tr.style.display = show ? '' : 'none';
+      });
+    }
+
+    function submitFeedback(id, feedback, btn) {
+      if (!id) return;
+      fetch('/api/feedback', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id, feedback, correction: null })
+      }).then(() => {
+        const btns = btn.closest('.feedback-btns').querySelectorAll('.fb-btn');
+        btns.forEach(b => b.classList.remove('active-good','active-bad'));
+        btn.classList.add(feedback === 'good' ? 'active-good' : 'active-bad');
+      });
+    }
+
+    function toggleCorrection(id, btn) {
+      if (!id) return;
+      const area = document.getElementById('corr-' + id);
+      if (area) {
+        area.style.display = area.style.display === 'block' ? 'none' : 'block';
+        btn.classList.toggle('active-bad');
+      }
+    }
+
+    function submitCorrection(id) {
+      if (!id) return;
+      const area = document.getElementById('corr-' + id);
+      if (!area) return;
+      const correction = area.querySelector('textarea').value;
+      fetch('/api/feedback', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id, feedback: 'bad', correction })
+      }).then(() => { area.style.display = 'none'; });
+    }
+
+    // Load initial entries
+    fetch('/api/entries?limit=50')
+      .then(r => r.json())
+      .then(entries => {
+        const tbody = document.getElementById('entries-body');
+        // entries come newest-first, display as-is
+        entries.forEach(entry => {
+          addEntryToStats(entry);
+          tbody.appendChild(createRow(entry));
+        });
+        allEntries = entries;
+        updateStats();
+      })
+      .catch(err => console.error('Failed to load entries:', err));
+
+    // SSE for live updates
+    function connectSSE() {
+      const statusEl = document.getElementById('status');
+      const banner = document.getElementById('banner');
+
+      const es = new EventSource('/api/stream');
+
+      es.onopen = () => {
+        statusEl.textContent = 'Live';
+        statusEl.className = 'status connected';
+        banner.classList.remove('show');
+      };
+
+      es.onmessage = (event) => {
+        try {
+          const entry = JSON.parse(event.data);
+          addEntryToStats(entry);
+          updateStats();
+          const tbody = document.getElementById('entries-body');
+          const row = createRow(entry);
+          tbody.insertBefore(row, tbody.firstChild);
+          applyFilters();
+        } catch (e) {
+          console.error('SSE parse error:', e);
+        }
+      };
+
+      es.onerror = () => {
+        statusEl.textContent = 'Offline';
+        statusEl.className = 'status';
+        banner.classList.add('show');
+        es.close();
+        setTimeout(connectSSE, 5000); // retry after 5s
+      };
+    }
+
+    connectSSE();
+
+    // Pending suggestions polling
+    async function loadPending() {
+      try {
+        const res = await fetch("/api/pending");
+        const rows = await res.json();
+        const section = document.getElementById("pending-section");
+        const list = document.getElementById("pending-list");
+        const count = document.getElementById("pending-count");
+        if (rows.length === 0) { section.style.display = "none"; return; }
+        section.style.display = "block";
+        count.textContent = rows.length;
+        list.innerHTML = rows.map(row => `
+          <div class="pending-card" data-id="${row.id}" style="border:1px solid #f59e0b; border-radius:8px; padding:12px; margin:8px 0; background:#1a1a2e; color:#e5e7eb;">
+            <div style="margin-bottom:8px;">
+              <strong style="color:#60a5fa;">${escHtml(row.patient_name || row.jid)}</strong>
+              <span style="color:#9ca3af; font-size:0.85em; margin-left:8px;">${new Date(row.created_at).toLocaleTimeString('nl-NL')}</span>
+            </div>
+            <div style="margin-bottom:8px; color:#d1d5db; font-style:italic;">"${escHtml(row.inbound_message)}"</div>
+            <div style="margin-bottom:12px; color:#a5b4fc; white-space:pre-wrap;">${escHtml(row.proposed_message)}</div>
+            <div class="pending-actions" style="display:flex; gap:8px;">
+              <button onclick="approvePending(${row.id})" style="background:#22c55e; color:white; border:none; padding:6px 16px; border-radius:4px; cursor:pointer;">Stuur</button>
+              <button onclick="startPendingEdit(${row.id})" style="background:#3b82f6; color:white; border:none; padding:6px 16px; border-radius:4px; cursor:pointer;">Bewerk</button>
+              <button onclick="rejectPending(${row.id})" style="background:#ef4444; color:white; border:none; padding:6px 16px; border-radius:4px; cursor:pointer;">Negeer</button>
+            </div>
+            <div class="pending-edit-area" style="display:none; margin-top:8px;">
+              <textarea style="width:100%; min-height:80px; background:#111; color:#e5e7eb; border:1px solid #3b82f6; border-radius:4px; padding:8px; font-family:inherit; box-sizing:border-box;">${escHtml(row.proposed_message)}</textarea>
+              <div style="margin-top:4px; display:flex; gap:8px;">
+                <button onclick="sendPendingEdited(${row.id})" style="background:#22c55e; color:white; border:none; padding:6px 16px; border-radius:4px; cursor:pointer;">Stuur bewerkt</button>
+                <button onclick="cancelPendingEdit(${row.id})" style="background:#6b7280; color:white; border:none; padding:6px 12px; border-radius:4px; cursor:pointer;">Annuleer</button>
+              </div>
+            </div>
+          </div>
+        `).join("");
+      } catch (err) { console.error("Pending load error:", err); }
+    }
+
+    async function approvePending(id) {
+      const r = await fetch("/api/approve", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ id }) });
+      const d = await r.json();
+      if (d.ok) loadPending(); else alert(d.error || "Fout bij goedkeuren");
+    }
+
+    async function rejectPending(id) {
+      const r = await fetch("/api/reject", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ id }) });
+      const d = await r.json();
+      if (d.ok) loadPending(); else alert(d.error || "Fout bij afwijzen");
+    }
+
+    function startPendingEdit(id) {
+      const c = document.querySelector(`.pending-card[data-id="${id}"]`);
+      c.querySelector(".pending-actions").style.display = "none";
+      c.querySelector(".pending-edit-area").style.display = "block";
+    }
+
+    function cancelPendingEdit(id) {
+      const c = document.querySelector(`.pending-card[data-id="${id}"]`);
+      c.querySelector(".pending-actions").style.display = "flex";
+      c.querySelector(".pending-edit-area").style.display = "none";
+    }
+
+    async function sendPendingEdited(id) {
+      const c = document.querySelector(`.pending-card[data-id="${id}"]`);
+      const editedMessage = c.querySelector("textarea").value;
+      const r = await fetch("/api/approve", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ id, editedMessage }) });
+      const d = await r.json();
+      if (d.ok) loadPending(); else alert(d.error || "Fout bij versturen");
+    }
+
+    loadPending();
+    setInterval(loadPending, 5000);
+  </script>
+</body>
+</html>

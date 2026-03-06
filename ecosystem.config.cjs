@@ -13,7 +13,7 @@ module.exports = {
       DB_PATH: "/opt/whatsapp-bot/data/watch.db",
       KENNIS_DIR: "/opt/whatsapp-bot/kennis",
       // Phase 5: Telegram bot env vars
-      TELEGRAM_BOT_TOKEN: process.env.TELEGRAM_BOT_TOKEN || '',
+      TELEGRAM_BOT_TOKEN: '8189979731:AAGOVc3q5A7St2AuBl82h-qeAfoGtAbvAj4',
       ROGIER_TELEGRAM_ID: process.env.ROGIER_TELEGRAM_ID || '6237130967',
       MOUMEN_TELEGRAM_ID: process.env.MOUMEN_TELEGRAM_ID || '',
       TELEGRAM_ALLOWED_USERS: process.env.TELEGRAM_ALLOWED_USERS || '6237130967',

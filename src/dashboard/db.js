@@ -1,8 +1,9 @@
 import Database from "better-sqlite3";
 import { mkdirSync } from "fs";
 
-const DB_PATH = process.env.DB_PATH ?? "/opt/whatsapp-bot/data/watch.db";
-mkdirSync("/opt/whatsapp-bot/data", { recursive: true });
+const BOT_ROOT = process.env.BOT_ROOT || '/opt/whatsapp-bot';
+const DB_PATH = process.env.DB_PATH ?? (BOT_ROOT + '/data/watch.db');
+mkdirSync(BOT_ROOT + '/data', { recursive: true });
 
 const db = new Database(DB_PATH);
 db.pragma("journal_mode = WAL"); // Critical: concurrent write safety

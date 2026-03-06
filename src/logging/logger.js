@@ -4,7 +4,8 @@ import pino from "pino";
 import { join } from "path";
 import { mkdirSync } from "fs";
 
-const LOG_DIR = "/opt/whatsapp-bot/logs";
+const BOT_ROOT = process.env.BOT_ROOT || '/opt/whatsapp-bot';
+const LOG_DIR = BOT_ROOT + '/logs';
 
 // Ensure log dir exists before transport initializes
 mkdirSync(LOG_DIR, { recursive: true });

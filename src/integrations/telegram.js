@@ -69,18 +69,35 @@ function recoverPendingEscalations() {
   try {
     const pending = getPendingForStartupRecovery();
     const now = Date.now();
+    const ESCALATION_MS = 30 * 60 * 1000;
     for (const row of pending) {
-      const remaining = 30 * 60 * 1000 - (now - row.created_at);
+      const createdAt = typeof row.created_at === 'number' ? row.created_at : new Date(row.created_at).getTime();
+      const elapsed = now - createdAt;
+      const remaining = Math.max(0, ESCALATION_MS - elapsed);
       const meta = { patientName: row.patient_name ?? maskPhoneDisplay(row.jid), customerMsg: row.inbound_message, proposedReply: row.proposed_message };
       if (remaining > 0) {
-        scheduleEscalation(row.id, meta);
-        console.log(`[telegram] Recovered escalation ${row.id} (${Math.round(remaining/1000)}s remaining)`);
-      } else {
-        (async () => {
+        // FIX 6: use remaining time instead of fresh 30-minute timer
+        const handle = setTimeout(async () => {
+          escalationTimers.delete(row.id);
           try {
+            const r = getPendingSuggestion(row.id);
+            if (!r || r.status !== "pending") return;
             const msgId = await sendSuggestNotification({ chatId: ROGIER_CHAT_ID, suggestionId: row.id, ...meta, isEscalation: true });
             if (msgId) setRogierMsgId(row.id, msgId);
           } catch (err) { console.error("[telegram] Recovery escalation failed:", err.message); }
+        }, remaining);
+        handle.unref();
+        escalationTimers.set(row.id, handle);
+        console.log(`[telegram] Recovered escalation ${row.id} (${Math.round(remaining/1000)}s remaining)`);
+      } else {
+        // Already expired — escalate immediately
+        (async () => {
+          try {
+            const r = getPendingSuggestion(row.id);
+            if (!r || r.status !== "pending") return;
+            const msgId = await sendSuggestNotification({ chatId: ROGIER_CHAT_ID, suggestionId: row.id, ...meta, isEscalation: true });
+            if (msgId) setRogierMsgId(row.id, msgId);
+          } catch (err) { console.error("[telegram] Recovery escalation (expired) failed:", err.message); }
         })();
       }
     }
@@ -117,17 +134,28 @@ export function startTelegramBot() {
   bot.callbackQuery(/^approve:(\d+)$/, async (ctx) => {
     if (!isAuthorized(ctx)) { await ctx.answerCallbackQuery({ text: "Niet geautoriseerd." }); return; }
     const id = Number(ctx.match[1]);
-    const result = approveSuggestion(id, ctx.from.id);
-    if (!result.ok) { await ctx.answerCallbackQuery({ text: "Al afgehandeld door iemand anders." }); return; }
+    // FIX 4: send FIRST, approve in DB only after successful send
     const row = getPendingSuggestion(id);
-    if (row) {
-      try {
-        const sock = getSocket();
-        await sendText(sock, row.jid, row.proposed_message);
-      } catch (err) {
-        await ctx.answerCallbackQuery({ text: "Versturen mislukt: " + err.message });
+    if (!row || row.status !== 'pending') {
+      await ctx.answerCallbackQuery({ text: "Al afgehandeld door iemand anders." });
+      return;
+    }
+    try {
+      const sock = getSocket();
+      const sendResult = await sendText(sock, row.jid, row.proposed_message);
+      if (sendResult && sendResult.sent === false) {
+        await ctx.answerCallbackQuery({ text: "Sturen mislukt: rate limited — probeer opnieuw." });
         return;
       }
+    } catch (err) {
+      await ctx.answerCallbackQuery({ text: "Sturen mislukt: " + err.message });
+      return;
+    }
+    // Send succeeded — now approve in DB
+    const result = approveSuggestion(id, ctx.from.id);
+    if (!result.ok) {
+      // Race: someone else approved between our send and this DB write — not ideal but message was sent
+      console.warn("[telegram] approve race: message sent but DB already handled id=", id);
     }
     cancelEscalation(id);
     await ctx.answerCallbackQuery({ text: "✅ Verstuurd!" });
@@ -161,13 +189,21 @@ export function startTelegramBot() {
     if (editState) {
       awaitingEdit.delete(ctx.chat.id);
       const { suggestionId, jid } = editState;
-      const result = approveSuggestion(suggestionId, ctx.from.id, ctx.message.text);
-      if (!result.ok) { await ctx.reply("Al afgehandeld door iemand anders."); return; }
+      // FIX 4: send FIRST, approve in DB only after successful send
       try {
-        await sendText(getSocket(), jid, ctx.message.text);
-        cancelEscalation(suggestionId);
-        await ctx.reply("✅ Aangepaste versie verstuurd.");
-      } catch (err) { await ctx.reply("Versturen mislukt: " + err.message); }
+        const sendResult = await sendText(getSocket(), jid, ctx.message.text);
+        if (sendResult && sendResult.sent === false) {
+          await ctx.reply("Sturen mislukt: rate limited — probeer opnieuw.");
+          return;
+        }
+      } catch (err) {
+        await ctx.reply("Versturen mislukt: " + err.message);
+        return;
+      }
+      const result = approveSuggestion(suggestionId, ctx.from.id, ctx.message.text);
+      if (!result.ok) { await ctx.reply("Al afgehandeld door iemand anders (bericht is wel verstuurd)."); return; }
+      cancelEscalation(suggestionId);
+      await ctx.reply("✅ Aangepaste versie verstuurd.");
       return;
     }
 

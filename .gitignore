@@ -4,3 +4,4 @@ auth/
 auth-backup-20260304/
 data/
 logs/
+ecosystem.config.cjs

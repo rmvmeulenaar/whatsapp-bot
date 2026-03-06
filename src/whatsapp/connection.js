@@ -10,7 +10,8 @@ import pino from "pino";
 import { logConnection, logError } from "../logging/logger.js";
 import { sendDisconnectAlert } from "../integrations/telegram.js";
 
-const AUTH_DIR = "/opt/whatsapp-bot/auth";
+const BOT_ROOT = process.env.BOT_ROOT || '/opt/whatsapp-bot';
+const AUTH_DIR = BOT_ROOT + '/auth';
 
 // Suppress Baileys internal logs — they are noisy and not useful at runtime
 const silentLogger = pino({ level: "silent" });
@@ -78,7 +79,7 @@ export async function createSocket(onMessage) {
     if (qr) {
       // QR appearing means auth is invalid — auth corruption or session was invalidated
       logConnection("qr_requested");
-      console.error("[FATAL] QR code requested — auth state invalid. Check /opt/whatsapp-bot/auth/");
+      console.error("[FATAL] QR code requested — auth state invalid. Check " + AUTH_DIR);
       process.exit(1);
     }
 

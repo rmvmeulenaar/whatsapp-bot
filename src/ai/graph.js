@@ -141,8 +141,14 @@ export async function runGraph(jid, inboundText) {
     const socket = getSocket();
     if (socket) {
       try {
-        await sendText(socket, jid, result.output);
-        action = 'sent';
+        // FIX 5: check return value — { sent: false } means rate limited
+        const sendResult = await sendText(socket, jid, result.output);
+        if (sendResult && sendResult.sent === false) {
+          logEvent({ type: 'auto_send_rate_limited', jid: maskPhone(jid), reason: sendResult.reason });
+          action = 'rate_limited';
+        } else {
+          action = 'auto_reply';
+        }
       } catch (err) {
         logEvent({ type: 'auto_send_failed', jid: maskPhone(jid), error: err.message });
         action = 'send_failed';

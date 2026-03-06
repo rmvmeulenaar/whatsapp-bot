@@ -12,6 +12,9 @@ import { maskPhone } from "../integrations/clinicminds.js";
 import { getConversation, markSuggestionTakenOver, getExistingPending } from "../dashboard/db.js";
 import { cancelEscalation } from "../integrations/telegram.js";
 
+// FIX 3: import wasBotSent to skip takeover for bot-sent fromMe messages
+import { wasBotSent } from "./outbound.js";
+
 // TTL-based deduplicator prevents double-processing on reconnect (Pitfall #4)
 // Uses Map (not Set) so entries expire — prevents unbounded memory growth (Pitfall #11)
 class MessageDeduplicator {
@@ -58,28 +61,35 @@ async function processMessage(msg, onMessageEvent) {
   const id = msg.key.id;
 
   // fromMe check — als team zelf antwoordt, set takeover flag (Phase 2)
+  // FIX 3: skip takeover if this fromMe was sent by the bot itself (not a human)
   if (msg.key.fromMe) {
     if (remoteJid && !remoteJid.endsWith("@broadcast") && !remoteJid.endsWith("@g.us")) {
-      setTakeover(remoteJid);
-      logEvent({ type: "fromMe_takeover", jid: maskPhone(remoteJid) });
+      if (wasBotSent(remoteJid)) {
+        // Bot-sent echo — ignore, do NOT set takeover
+        logEvent({ type: "fromMe_bot_skip", jid: maskPhone(remoteJid) });
+      } else {
+        // Human-typed fromMe — set takeover as before
+        setTakeover(remoteJid);
+        logEvent({ type: "fromMe_takeover", jid: maskPhone(remoteJid) });
 
-      // Phase 5: als JID in suggest-mode staat, markeer pending als taken_over
-      try {
-        const conv = getConversation.get(remoteJid); // prepared statement — use .get()
-        if (conv && conv.mode === 'suggest') {
-          // CRITICAL ORDER: get pending FIRST (while status is still 'pending'),
-          // THEN mark as taken_over, THEN cancel escalation using stored ID.
-          // If you mark first, getExistingPending returns null (status no longer 'pending')
-          // and the escalation timer leaks.
-          const existing = getExistingPending(remoteJid);
-          markSuggestionTakenOver(remoteJid);
-          if (existing) {
-            cancelEscalation(existing.id);
+        // Phase 5: als JID in suggest-mode staat, markeer pending als taken_over
+        try {
+          const conv = getConversation.get(remoteJid); // prepared statement — use .get()
+          if (conv && conv.mode === 'suggest') {
+            // CRITICAL ORDER: get pending FIRST (while status is still 'pending'),
+            // THEN mark as taken_over, THEN cancel escalation using stored ID.
+            // If you mark first, getExistingPending returns null (status no longer 'pending')
+            // and the escalation timer leaks.
+            const existing = getExistingPending(remoteJid);
+            markSuggestionTakenOver(remoteJid);
+            if (existing) {
+              cancelEscalation(existing.id);
+            }
+            logEvent({ type: "suggest_taken_over", jid: maskPhone(remoteJid) });
           }
-          logEvent({ type: "suggest_taken_over", jid: maskPhone(remoteJid) });
+        } catch (err) {
+          console.error("[inbound] suggest takeover check failed:", err.message);
         }
-      } catch (err) {
-        console.error("[inbound] suggest takeover check failed:", err.message);
       }
     }
     return; // Niet door pipeline sturen

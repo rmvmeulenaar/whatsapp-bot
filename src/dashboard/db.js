@@ -115,6 +115,11 @@ db.exec(`
   )
 `);
 
+// Startup recovery: reset any 'sending' rows left over from a previous crash
+try {
+  db.exec(`UPDATE pending_suggestions SET status = 'pending' WHERE status = 'sending'`);
+} catch { /* table may not exist on first run */ }
+
 // === Phase 5: prepared statements for pending_suggestions ===
 const insertPending = db.prepare(`
   INSERT INTO pending_suggestions (jid, proposed_message, inbound_message, patient_name, status, created_at)
@@ -148,6 +153,19 @@ const markTakenOver = db.prepare(`
   UPDATE pending_suggestions SET status = 'taken_over' WHERE jid = @jid AND status = 'pending'
 `);
 const getAllModes = db.prepare(`SELECT jid, mode FROM conversations WHERE mode != 'watch' ORDER BY mode`);
+
+// === Phase 5 (fix): atomic claim-before-send to prevent double-send race ===
+const claimPending = db.prepare(`
+  UPDATE pending_suggestions SET status = 'sending' WHERE id = @id AND status = 'pending'
+`);
+const resetPendingClaim = db.prepare(`
+  UPDATE pending_suggestions SET status = 'pending' WHERE id = @id AND status = 'sending'
+`);
+const finalizePendingApproval = db.prepare(`
+  UPDATE pending_suggestions
+  SET status = 'approved', approved_by = @approvedBy, edited_message = @editedMessage
+  WHERE id = @id AND status = 'sending'
+`);
 
 // === Phase 5: export functions for pending_suggestions ===
 export function insertPendingSuggestion({ jid, proposed_message, inbound_message, patient_name, watch_entry_id }) {
@@ -192,6 +210,17 @@ export function markSuggestionTakenOver(jid) {
 }
 export function getAllConversationModes() {
   return getAllModes.all();
+}
+export function claimSuggestion(id) {
+  const { changes } = claimPending.run({ id });
+  return { ok: changes > 0 };
+}
+export function resetSuggestionToPending(id) {
+  resetPendingClaim.run({ id });
+}
+export function finalizeSuggestionApproval(id, approvedBy, editedMessage = null) {
+  const { changes } = finalizePendingApproval.run({ id, approvedBy, editedMessage });
+  return { ok: changes > 0 };
 }
 
 export { db };

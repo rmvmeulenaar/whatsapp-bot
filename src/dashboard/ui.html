@@ -251,13 +251,11 @@
       });
     }
 
-    function getToken() { return window.__DASHBOARD_TOKEN__ || ''; }
-
     function submitFeedback(id, feedback, btn) {
       if (!id) return;
       fetch('/api/feedback', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'X-Dashboard-Token': getToken() },
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ id, feedback, correction: null })
       }).then(() => {
         const btns = btn.closest('.feedback-btns').querySelectorAll('.fb-btn');
@@ -282,17 +280,16 @@
       const correction = area.querySelector('textarea').value;
       fetch('/api/feedback', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'X-Dashboard-Token': getToken() },
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ id, feedback: 'bad', correction })
       }).then(() => { area.style.display = 'none'; });
     }
 
     // Load initial entries
-    fetch('/api/entries?limit=50', { headers: { 'X-Dashboard-Token': getToken() } })
+    fetch('/api/entries?limit=50')
       .then(r => r.json())
       .then(entries => {
         const tbody = document.getElementById('entries-body');
-        // entries come newest-first, display as-is
         entries.forEach(entry => {
           addEntryToStats(entry);
           tbody.appendChild(createRow(entry));
@@ -307,7 +304,7 @@
       const statusEl = document.getElementById('status');
       const banner = document.getElementById('banner');
 
-      const es = new EventSource('/api/stream?token=' + encodeURIComponent(getToken()));
+      const es = new EventSource('/api/stream');
 
       es.onopen = () => {
         statusEl.textContent = 'Live';
@@ -343,7 +340,7 @@
     // Pending suggestions polling
     async function loadPending() {
       try {
-        const res = await fetch("/api/pending", { headers: { 'X-Dashboard-Token': getToken() } });
+        const res = await fetch("/api/pending");
         const rows = await res.json();
         const section = document.getElementById("pending-section");
         const list = document.getElementById("pending-list");
@@ -377,13 +374,13 @@
     }
 
     async function approvePending(id) {
-      const r = await fetch("/api/approve", { method: "POST", headers: { "Content-Type": "application/json", "X-Dashboard-Token": getToken() }, body: JSON.stringify({ id }) });
+      const r = await fetch("/api/approve", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ id }) });
       const d = await r.json();
       if (d.ok) loadPending(); else alert(d.error || "Fout bij goedkeuren");
     }
 
     async function rejectPending(id) {
-      const r = await fetch("/api/reject", { method: "POST", headers: { "Content-Type": "application/json", "X-Dashboard-Token": getToken() }, body: JSON.stringify({ id }) });
+      const r = await fetch("/api/reject", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ id }) });
       const d = await r.json();
       if (d.ok) loadPending(); else alert(d.error || "Fout bij afwijzen");
     }
@@ -403,7 +400,7 @@
     async function sendPendingEdited(id) {
       const c = document.querySelector(`.pending-card[data-id="${id}"]`);
       const editedMessage = c.querySelector("textarea").value;
-      const r = await fetch("/api/approve", { method: "POST", headers: { "Content-Type": "application/json", "X-Dashboard-Token": getToken() }, body: JSON.stringify({ id, editedMessage }) });
+      const r = await fetch("/api/approve", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ id, editedMessage }) });
       const d = await r.json();
       if (d.ok) loadPending(); else alert(d.error || "Fout bij versturen");
     }

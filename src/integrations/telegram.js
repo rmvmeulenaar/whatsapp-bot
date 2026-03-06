@@ -2,10 +2,11 @@
 // Phase 5: Telegram approval bot — grammY polling
 import { Bot, InlineKeyboard } from "grammy";
 import {
-  approveSuggestion, rejectSuggestion, getPendingSuggestion,
+  rejectSuggestion, getPendingSuggestion,
   getExistingPending, supersedeSuggestion, setMoumenMsgId,
   setRogierMsgId, getPendingForStartupRecovery,
-  markSuggestionTakenOver, getAllConversationModes, setConversationMode
+  markSuggestionTakenOver, getAllConversationModes, setConversationMode,
+  claimSuggestion, resetSuggestionToPending, finalizeSuggestionApproval
 } from "../dashboard/db.js";
 import { sendText } from "../whatsapp/outbound.js";
 import { getSocket } from "../whatsapp/connection.js";
@@ -134,29 +135,28 @@ export function startTelegramBot() {
   bot.callbackQuery(/^approve:(\d+)$/, async (ctx) => {
     if (!isAuthorized(ctx)) { await ctx.answerCallbackQuery({ text: "Niet geautoriseerd." }); return; }
     const id = Number(ctx.match[1]);
-    // FIX 4: send FIRST, approve in DB only after successful send
-    const row = getPendingSuggestion(id);
-    if (!row || row.status !== 'pending') {
+    // Atomic claim: pending → sending (prevents double-send race)
+    const claimed = claimSuggestion(id);
+    if (!claimed.ok) {
       await ctx.answerCallbackQuery({ text: "Al afgehandeld door iemand anders." });
       return;
     }
+    const row = getPendingSuggestion(id);
     try {
       const sock = getSocket();
       const sendResult = await sendText(sock, row.jid, row.proposed_message);
       if (sendResult && sendResult.sent === false) {
+        resetSuggestionToPending(id);
         await ctx.answerCallbackQuery({ text: "Sturen mislukt: rate limited — probeer opnieuw." });
         return;
       }
     } catch (err) {
+      resetSuggestionToPending(id);
       await ctx.answerCallbackQuery({ text: "Sturen mislukt: " + err.message });
       return;
     }
-    // Send succeeded — now approve in DB
-    const result = approveSuggestion(id, ctx.from.id);
-    if (!result.ok) {
-      // Race: someone else approved between our send and this DB write — not ideal but message was sent
-      console.warn("[telegram] approve race: message sent but DB already handled id=", id);
-    }
+    // Send succeeded — finalize (sending → approved)
+    finalizeSuggestionApproval(id, ctx.from.id);
     cancelEscalation(id);
     await ctx.answerCallbackQuery({ text: "✅ Verstuurd!" });
     try { await ctx.editMessageText((ctx.msg?.text ?? "") + "\n\n✅ Verstuurd door " + (ctx.from.first_name ?? "onbekend"), { reply_markup: new InlineKeyboard() }); } catch (_) {}
@@ -189,19 +189,22 @@ export function startTelegramBot() {
     if (editState) {
       awaitingEdit.delete(ctx.chat.id);
       const { suggestionId, jid } = editState;
-      // FIX 4: send FIRST, approve in DB only after successful send
+      // Atomic claim: pending → sending (prevents double-send race)
+      const claimed = claimSuggestion(suggestionId);
+      if (!claimed.ok) { await ctx.reply("Al afgehandeld door iemand anders."); return; }
       try {
         const sendResult = await sendText(getSocket(), jid, ctx.message.text);
         if (sendResult && sendResult.sent === false) {
+          resetSuggestionToPending(suggestionId);
           await ctx.reply("Sturen mislukt: rate limited — probeer opnieuw.");
           return;
         }
       } catch (err) {
+        resetSuggestionToPending(suggestionId);
         await ctx.reply("Versturen mislukt: " + err.message);
         return;
       }
-      const result = approveSuggestion(suggestionId, ctx.from.id, ctx.message.text);
-      if (!result.ok) { await ctx.reply("Al afgehandeld door iemand anders (bericht is wel verstuurd)."); return; }
+      finalizeSuggestionApproval(suggestionId, ctx.from.id, ctx.message.text);
       cancelEscalation(suggestionId);
       await ctx.reply("✅ Aangepaste versie verstuurd.");
       return;

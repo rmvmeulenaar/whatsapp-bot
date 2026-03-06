@@ -4,11 +4,11 @@ require('dotenv').config({ path: require('path').join(__dirname, '.env') });
 
 module.exports = {
   apps: [{
-    name: whatsapp-bot,
-    script: ./src/index.js,
-    cwd: /opt/whatsapp-bot,
+    name: 'whatsapp-bot',
+    script: './src/index.js',
+    cwd: '/opt/whatsapp-bot',
     env: {
-      NODE_ENV: production,
+      NODE_ENV: 'production',
       // Secrets — loaded from .env (never commit .env or ecosystem.config.cjs)
       OPENROUTER_API_KEY: process.env.OPENROUTER_API_KEY || '',
       CLINICMINDS_TA_API_KEY: process.env.CLINICMINDS_TA_API_KEY || '',
@@ -16,19 +16,18 @@ module.exports = {
       ROGIER_TELEGRAM_ID: process.env.ROGIER_TELEGRAM_ID || '',
       MOUMEN_TELEGRAM_ID: process.env.MOUMEN_TELEGRAM_ID || '',
       TELEGRAM_ALLOWED_USERS: process.env.TELEGRAM_ALLOWED_USERS || '',
-      DASHBOARD_API_KEY: process.env.DASHBOARD_API_KEY || 'radiance-dashboard',
       BOT_ROOT: process.env.BOT_ROOT || '/opt/whatsapp-bot',
       // Non-secret config
       DASHBOARD_PORT: 3001,
-      DB_PATH: /opt/whatsapp-bot/data/watch.db,
-      KENNIS_DIR: /opt/whatsapp-bot/kennis,
+      DB_PATH: '/opt/whatsapp-bot/data/watch.db',
+      KENNIS_DIR: '/opt/whatsapp-bot/kennis',
     },
     restart_delay: 5000,
     max_restarts: 5,
-    min_uptime: 10s,
+    min_uptime: '10s',
     exp_backoff_restart_delay: 100,
-    out_file: /opt/whatsapp-bot/logs/pm2-out.log,
-    error_file: /opt/whatsapp-bot/logs/pm2-err.log,
-    log_date_format: YYYY-MM-DD HH:mm:ss
+    out_file: '/opt/whatsapp-bot/logs/pm2-out.log',
+    error_file: '/opt/whatsapp-bot/logs/pm2-err.log',
+    log_date_format: 'YYYY-MM-DD HH:mm:ss'
   }]
 };

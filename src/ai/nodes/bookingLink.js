@@ -1,5 +1,6 @@
 const API_BASE = process.env.PVI_API_BASE ?? "https://pvi-voicebot.vercel.app";
 const API_SECRET = process.env.PVI_WEBHOOK_SECRET ?? "";
+const DEFAULT_LOCATION = process.env.BOOKING_DEFAULT_LOCATION ?? "nijmegen";
 
 const TREATMENT_KEYWORDS = {
   "lip filler": "lip filler",
@@ -22,7 +23,20 @@ const TREATMENT_KEYWORDS = {
   dieet: "afvallen",
 };
 
-const VALID_LOCATIONS = new Set(["nijmegen", "sittard", "enschede"]);
+// Location keywords → API location key
+const LOCATION_KEYWORDS = {
+  nijmegen: "nijmegen",
+  enschede: "enschede",
+  sittard: "sittard",
+};
+
+// Clinic field → API location key (for when state.clinic is set)
+const CLINIC_MAP = {
+  nijmegen: "nijmegen",
+  enschede: "enschede",
+  sittard: "sittard",
+  radiance: DEFAULT_LOCATION,
+};
 
 function jidToPhone(jid) {
   // "31612345678@s.whatsapp.net" → "0612345678"
@@ -42,7 +56,13 @@ export async function bookingLinkNode(state) {
     if (text.includes(key)) { treatment = val; break; }
   }
 
-  const location = VALID_LOCATIONS.has(state.clinic) ? state.clinic : undefined;
+  // Detect location: message body → state.clinic → default
+  let location = null;
+  for (const [key, val] of Object.entries(LOCATION_KEYWORDS)) {
+    if (text.includes(key)) { location = val; break; }
+  }
+  if (!location) location = CLINIC_MAP[state.clinic] ?? DEFAULT_LOCATION;
+
   const phone = jidToPhone(state.jid);
 
   const payload = { phone };

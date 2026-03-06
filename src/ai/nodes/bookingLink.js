@@ -1,53 +1,87 @@
-const BOOKING_BASE = "https://schedule.clinicminds.com/book";
+const API_BASE = process.env.PVI_API_BASE ?? "https://pvi-voicebot.vercel.app";
+const API_SECRET = process.env.PVI_WEBHOOK_SECRET ?? "";
 
-const TREATMENT_SLUGS = {
+const TREATMENT_KEYWORDS = {
+  "lip filler": "lip filler",
+  "anti-aging": "anti-aging",
   botox: "botox",
   filler: "filler",
-  lip: "lip-filler",
-  "lip filler": "lip-filler",
+  lip: "lip filler",
   skinbooster: "skinbooster",
   microneedling: "microneedling",
-  "chemical peel": "chemical-peel",
-  peel: "chemical-peel",
-  prp: "prp",
+  peel: "chemical peel",
   laser: "laser",
+  afvallen: "afvallen",
+  ozempic: "ozempic",
+  wegovy: "wegovy",
+  mounjaro: "mounjaro",
+  saxenda: "saxenda",
+  hormonen: "anti-aging",
+  menopauze: "anti-aging",
+  gewicht: "afvallen",
+  dieet: "afvallen",
 };
 
-const LOCATION_IDS = {
-  nijmegen: "nijmegen",
-  amsterdam: "amsterdam",
-  utrecht: "utrecht",
-  eindhoven: "eindhoven",
-  "den haag": "den-haag",
-  rotterdam: "rotterdam",
-  radiance: "radiance",
-};
+const VALID_LOCATIONS = new Set(["nijmegen", "sittard", "enschede"]);
+
+function jidToPhone(jid) {
+  // "31612345678@s.whatsapp.net" → "0612345678"
+  const raw = jid.split("@")[0];
+  if (raw.startsWith("31") && raw.length >= 11) {
+    return "0" + raw.slice(2);
+  }
+  return raw;
+}
 
 export async function bookingLinkNode(state) {
   const text = state.body.toLowerCase();
 
+  // Detect treatment from message (longest match first via key ordering above)
   let treatment = null;
-  for (const [key, slug] of Object.entries(TREATMENT_SLUGS)) {
-    if (text.includes(key)) { treatment = slug; break; }
+  for (const [key, val] of Object.entries(TREATMENT_KEYWORDS)) {
+    if (text.includes(key)) { treatment = val; break; }
   }
 
-  let location = null;
-  for (const [key, id] of Object.entries(LOCATION_IDS)) {
-    if (text.includes(key)) { location = id; break; }
+  const location = VALID_LOCATIONS.has(state.clinic) ? state.clinic : undefined;
+  const phone = jidToPhone(state.jid);
+
+  const payload = { phone };
+  if (treatment) payload.treatment = treatment;
+  if (location) payload.location = location;
+
+  try {
+    const res = await fetch(`${API_BASE}/tools/send-booking-sms`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "X-Webhook-Secret": API_SECRET,
+      },
+      body: JSON.stringify(payload),
+      signal: AbortSignal.timeout(8000),
+    });
+
+    if (res.ok) {
+      return {
+        results: [{
+          node: "bookingLink",
+          text: "Ik heb je een SMS gestuurd met een persoonlijke boekingslink. Klik op de link om zelf een tijdstip te kiezen. 📅",
+          type: "text",
+        }],
+        node_trace: ["bookingLink:sms_sent"],
+      };
+    }
+
+    const body = await res.json().catch(() => ({}));
+    throw new Error(`${res.status}: ${body.error ?? "api_error"}`);
+  } catch (err) {
+    return {
+      results: [{
+        node: "bookingLink",
+        text: "Je kunt een afspraak maken via onze website of door ons te bellen. 📞",
+        type: "text",
+      }],
+      node_trace: ["bookingLink:fallback"],
+      error: "booking_api_failed: " + err.message,
+    };
   }
-
-  if (!location && state.clinic && state.clinic !== "unknown") {
-    location = state.clinic === "radiance" ? "radiance" : "nijmegen";
-  }
-
-  const params = new URLSearchParams();
-  if (treatment) params.set("treatment", treatment);
-  if (location) params.set("location", location);
-
-  const url = params.toString() ? `${BOOKING_BASE}?${params}` : BOOKING_BASE;
-
-  return {
-    results: [{ node: "bookingLink", text: url, type: "link" }],
-    node_trace: ["bookingLink:done"],
-  };
 }

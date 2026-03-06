@@ -12,6 +12,11 @@ module.exports = {
       DASHBOARD_PORT: "3001",
       DB_PATH: "/opt/whatsapp-bot/data/watch.db",
       KENNIS_DIR: "/opt/whatsapp-bot/kennis",
+      // Phase 5: Telegram bot env vars
+      TELEGRAM_BOT_TOKEN: process.env.TELEGRAM_BOT_TOKEN || '',
+      ROGIER_TELEGRAM_ID: process.env.ROGIER_TELEGRAM_ID || '6237130967',
+      MOUMEN_TELEGRAM_ID: process.env.MOUMEN_TELEGRAM_ID || '',
+      TELEGRAM_ALLOWED_USERS: process.env.TELEGRAM_ALLOWED_USERS || '6237130967',
     },
     restart_delay: 5000,
     max_restarts: 5,

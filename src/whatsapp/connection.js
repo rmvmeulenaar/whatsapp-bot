@@ -8,6 +8,7 @@ import makeWASocket, {
 } from "@whiskeysockets/baileys";
 import pino from "pino";
 import { logConnection, logError } from "../logging/logger.js";
+import { sendDisconnectAlert } from "../integrations/telegram.js";
 
 const AUTH_DIR = "/opt/whatsapp-bot/auth";
 
@@ -106,6 +107,10 @@ export async function createSocket(onMessage) {
       const delay = calculateBackoff(reconnectAttempts++);
       logConnection("reconnecting", { attempt: reconnectAttempts, delayMs: delay, statusCode });
       console.log(`[WA] Disconnected. Reconnecting in ${delay}ms (attempt ${reconnectAttempts})`);
+
+      // Phase 5: stuur Telegram alert bij disconnect (non-blocking — mag reconnect flow niet vertragen)
+      sendDisconnectAlert(lastDisconnect?.error?.message ?? 'onbekend').catch(() => {});
+
       setTimeout(() => createSocket(onMessage), delay);
     }
   });

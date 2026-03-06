@@ -1,3 +1,5 @@
+import { getPendingBooking } from "../../dashboard/db.js";
+
 const KEYWORD_MAP = {
   prijs:      [/(?:wat |hoe ?veel |hoeveel )?(kost|prijs|tarief|euro|€)/i, /price|cost|how much/i],
   vestiging:  [/(?:waar |adres|locatie|vestiging|parkeer)/i, /(?:amsterdam|nijmegen|utrecht|eindhoven|den ?haag|rotterdam)/i, /location|address|where/i],
@@ -9,6 +11,15 @@ const KEYWORD_MAP = {
 };
 
 export async function routerNode(state) {
+  // Als er een lopende booking flow is, altijd naar booking routen
+  const pending = getPendingBooking(state.jid);
+  if (pending) {
+    return {
+      intent: { labels: ["booking"], confidence: 0.95, method: "pending_booking", routing: "content" },
+      node_trace: ["router:pending_booking"],
+    };
+  }
+
   const text = state.body.toLowerCase();
   const matched = [];
 

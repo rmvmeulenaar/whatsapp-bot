@@ -223,4 +223,42 @@ export function finalizeSuggestionApproval(id, approvedBy, editedMessage = null)
   return { ok: changes > 0 };
 }
 
+// === Fase 6: pending_bookings table (multi-turn booking flow) ===
+db.exec(`
+  CREATE TABLE IF NOT EXISTS pending_bookings (
+    jid        TEXT PRIMARY KEY,
+    treatment  TEXT,
+    step       TEXT NOT NULL DEFAULT 'asking_location',
+    created_at INTEGER NOT NULL
+  )
+`);
+
+const getPendingBookingStmt = db.prepare(`SELECT * FROM pending_bookings WHERE jid = @jid`);
+const setPendingBookingStmt = db.prepare(`
+  INSERT INTO pending_bookings (jid, treatment, step, created_at)
+  VALUES (@jid, @treatment, @step, @createdAt)
+  ON CONFLICT(jid) DO UPDATE SET treatment = @treatment, step = @step, created_at = @createdAt
+`);
+const clearPendingBookingStmt = db.prepare(`DELETE FROM pending_bookings WHERE jid = @jid`);
+
+const BOOKING_TTL_MS = 30 * 60 * 1000; // 30 minuten
+
+export function getPendingBooking(jid) {
+  const row = getPendingBookingStmt.get({ jid });
+  if (!row) return null;
+  if (Date.now() - row.created_at > BOOKING_TTL_MS) {
+    clearPendingBookingStmt.run({ jid });
+    return null;
+  }
+  return row;
+}
+
+export function setPendingBooking(jid, treatment) {
+  setPendingBookingStmt.run({ jid, treatment: treatment ?? null, step: 'asking_location', createdAt: Date.now() });
+}
+
+export function clearPendingBooking(jid) {
+  clearPendingBookingStmt.run({ jid });
+}
+
 export { db };

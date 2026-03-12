@@ -2,41 +2,54 @@ import { StateGraph, START, END } from "@langchain/langgraph";
 import { BotStateAnnotation } from "./state.js";
 import { withGuardrails } from "./guardrails.js";
 
-// Import all 12 nodes
+// Import all nodes
 import { routerNode } from "./nodes/router.js";
 import { classifierNode } from "./nodes/classifier.js";
 import { patientLookupNode } from "./nodes/patientLookup.js";
 import { escalationNode } from "./nodes/escalation.js";
-import { prijsNode } from "./nodes/prijs.js";
-import { vestigingNode } from "./nodes/vestiging.js";
-import { tijdenNode } from "./nodes/tijden.js";
-import { behandelingNode } from "./nodes/behandeling.js";
-import { faqNode } from "./nodes/faq.js";
-import { bookingLinkNode } from "./nodes/bookingLink.js";
 import { mergeNode } from "./nodes/merge.js";
+import { dispatcherNode } from "./nodes/dispatcher.js";
 import { guardrailNode } from "./nodes/guardrail.js";
 
 // Dashboard + logging imports
 import { insertEntry, broadcastEntry, getConversation, setConversationMode } from "../dashboard/db.js";
 import { logEvent } from "../logging/logger.js";
-import { appendHistory } from "./history.js";
+import { appendHistory, getHistory } from "./history.js";
 import { detectLanguage } from "./detect.js";
-import { maskPhone } from "../integrations/clinicminds.js";
+import { maskPhone, lookupPatientByPhone, normalizePhone } from "../integrations/clinicminds.js";
 
 // Outbound + connection imports
+import { Langfuse } from "langfuse";
 import { sendText } from "../whatsapp/outbound.js";
 import { getSocket } from "../whatsapp/connection.js";
 
-// Phase 5: Telegram suggest-mode imports (static — NOT dynamic import)
+// Phase 5: Telegram suggest-mode imports
 import { sendSuggestNotification, scheduleEscalation, replacePendingForJid } from "../integrations/telegram.js";
 import { insertPendingSuggestion, setMoumenMsgId, setRogierMsgId, getExistingPending } from "../dashboard/db.js";
 
-// contentRouterNode — KEPT as orphaned node (edges removed, node registration kept)
-// Routing is now done via addConditionalEdges on patientLookup
-async function _contentRouterNode(state) {
-  return { node_trace: ["contentRouter"] };
+// BUG-06 FIX: Multilingual greeting node
+const GREETINGS = {
+  nl: { greeting: "Hoi! Waarmee kan ik je helpen? — Molty", ack: "Graag gedaan! Als je nog vragen hebt, laat het me weten 😊 — Molty" },
+  en: { greeting: "Hi! How can I help you? — Molty", ack: "You're welcome! Feel free to ask if you have more questions 😊 — Molty" },
+  ar: { greeting: "مرحباً! كيف يمكنني مساعدتك؟ — Molty", ack: "بكل سرور! إذا كان لديك أي أسئلة، لا تتردد 😊 — Molty" },
+  tr: { greeting: "Merhaba! Size nasıl yardımcı olabilirim? — Molty", ack: "Rica ederim! Başka sorularınız olursa lütfen sorun 😊 — Molty" },
+  fr: { greeting: "Bonjour! Comment puis-je vous aider? — Molty", ack: "De rien! N'hésitez pas si vous avez d'autres questions 😊 — Molty" },
+};
+
+async function greetingNode(state) {
+  const lang = state.language ?? "nl";
+  const t = GREETINGS[lang] ?? GREETINGS.en;
+  const label = state.intent?.labels?.[0];
+  if (label === "acknowledgment") {
+    return { output: t.ack, node_trace: ["greeting:acknowledgment"] };
+  }
+  return { output: t.greeting, node_trace: ["greeting:done"] };
 }
-const contentRouterNode = withGuardrails(_contentRouterNode);
+
+// contentRouterNode — KEPT as orphaned node (edges removed, node registration kept)
+const contentRouterNode = withGuardrails(async function _contentRouterNode(state) {
+  return { node_trace: ["contentRouter"] };
+});
 
 // Build the StateGraph
 const workflow = new StateGraph(BotStateAnnotation);
@@ -47,12 +60,8 @@ workflow.addNode("classifier", classifierNode);
 workflow.addNode("patientLookup", patientLookupNode);
 workflow.addNode("contentRouter", contentRouterNode);
 workflow.addNode("escalation", escalationNode);
-workflow.addNode("prijs", prijsNode);
-workflow.addNode("vestiging", vestigingNode);
-workflow.addNode("tijden", tijdenNode);
-workflow.addNode("behandeling", behandelingNode);
-workflow.addNode("faq", faqNode);
-workflow.addNode("bookingLink", bookingLinkNode);
+workflow.addNode("greeting", greetingNode);   // BUG 12 FIX + BUG-06 FIX
+workflow.addNode("dispatcher", dispatcherNode);
 workflow.addNode("merge", mergeNode);
 workflow.addNode("guardrail", guardrailNode);
 
@@ -63,54 +72,83 @@ workflow.addEdge(START, "router");
 workflow.addConditionalEdges("router", (state) => {
   const routing = state.intent?.routing;
   if (routing === "escalation") return "escalation";
+  if (routing === "greeting") return "greeting";  // BUG 12 FIX
   if (routing === "classifier") return "classifier";
-  return "patientLookup"; // routing === "content" — go directly to patient lookup
+  return "patientLookup"; // routing === "content"
 });
 
 // Classifier routes to patientLookup
 workflow.addEdge("classifier", "patientLookup");
 
-// Multi-label parallel fan-out from patientLookup to content nodes
+// BUG-07 FIX: patientLookup → conditional: off_topic → END, notWelcome → escalation, else → dispatcher
 workflow.addConditionalEdges("patientLookup", (state) => {
-  const labels = state.intent?.labels ?? [];
-  const validNodes = ["prijs", "vestiging", "tijden", "behandeling", "faq", "bookingLink"];
-  // Map 'booking' label (from classifier) to 'bookingLink' node name
-  const mapped = labels.map(l => l === 'booking' ? 'bookingLink' : l);
-  const matched = mapped.filter(l => validNodes.includes(l));
-  return matched.length > 0 ? matched : ["faq"];
+  if (state.patient?.notWelcome) return "escalation";
+  if (state.intent?.labels?.[0] === "off_topic") return END;  // BUG-07: no output for off-topic
+  return "dispatcher";
 });
 
-// Fan-in: all content nodes -> merge (LangGraph waits only for triggered nodes)
-workflow.addEdge(["prijs", "vestiging", "tijden", "behandeling", "faq", "bookingLink"], "merge");
+// dispatcher -> merge
+workflow.addEdge("dispatcher", "merge");
 
 // merge -> guardrail -> END
 workflow.addEdge("merge", "guardrail");
 workflow.addEdge("guardrail", END);
 workflow.addEdge("escalation", END);
+workflow.addEdge("greeting", END);  // BUG 12 FIX
 
 // Compile ONCE at module load
 export const graph = workflow.compile();
 
-// runGraph — replaces runPipeline interface
-// Entry fields aligned with db.js insertEntry prepared statement:
-//   INSERT maps: @inbound_classification -> classification column
-//                @safety_classification -> safety_class column
+// Langfuse client — singleton
+const langfuse = new Langfuse({
+  secretKey: process.env.LANGFUSE_SECRET_KEY ?? "",
+  publicKey: process.env.LANGFUSE_PUBLIC_KEY ?? "",
+  baseUrl: process.env.LANGFUSE_BASE_URL ?? "https://cloud.langfuse.com",
+  flushAt: 1,
+  requestTimeout: 5000,
+});
+
+// SMS helper
+async function sendBookingSms(smsParams) {
+  const API_BASE = process.env.PVI_API_BASE ?? 'https://pvi-voicebot.vercel.app';
+  const API_SECRET = process.env.PVI_WEBHOOK_SECRET ?? '';
+  const res = await fetch(`${API_BASE}/tools/send-booking-sms`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'X-Webhook-Secret': API_SECRET },
+    body: JSON.stringify(smsParams),
+    signal: AbortSignal.timeout(8000),
+  });
+  if (!res.ok) throw new Error(`SMS failed: ${res.status}`);
+  return res.json();
+}
+
 export async function runGraph(jid, inboundText) {
   const ts = new Date().toISOString();
   const language = detectLanguage(inboundText);
   const startTs = Date.now();
 
-  // Look up per-JID mode from conversations table (default: watch)
+  // Look up per-JID mode from conversations table (BUG-01 FIX: default 'watch' not 'suggest')
   const conv = getConversation.get(jid);
   const mode = conv?.mode ?? 'watch';
   const clinic = conv?.clinic ?? 'unknown';
 
+  // Langfuse trace
+  const trace = langfuse.trace({
+    name: "whatsapp-message",
+    userId: maskPhone(jid),
+    input: inboundText,
+    metadata: { mode, clinic, jid: maskPhone(jid) },
+  });
+
+  // BUG-10 FIX: Include conversation history in initial state
   const initialState = {
     jid,
     body: inboundText,
     ts: startTs,
     mode,
     clinic,
+    language,
+    history: getHistory(jid),
   };
 
   let result;
@@ -129,19 +167,27 @@ export async function runGraph(jid, inboundText) {
     };
   }
 
-  // History update — only if we have actual output
+  // FIX: Ensure patient data is available for Telegram context
+  // (greeting/escalation-keyword paths skip patientLookup node)
+  if (!result.patient) {
+    try {
+      const phone = normalizePhone(jid.split("@")[0]);
+      result.patient = await lookupPatientByPhone(phone);
+    } catch (_) { /* non-fatal — proceed without patient context */ }
+  }
+
+  // BUG-09 FIX: Always log user message, even if bot has no output
+  appendHistory(jid, "user", inboundText);
   if (result.output) {
-    appendHistory(jid, "user", inboundText);
     appendHistory(jid, "assistant", result.output);
   }
 
-  // Auto-mode outbound (after graph.invoke())
+  // Auto-mode outbound
   let action = 'watch_log_only';
   if (mode === 'auto' && result.output && !result.error?.startsWith('guardrail')) {
     const socket = getSocket();
     if (socket) {
       try {
-        // FIX 5: check return value — { sent: false } means rate limited
         const sendResult = await sendText(socket, jid, result.output);
         if (sendResult && sendResult.sent === false) {
           logEvent({ type: 'auto_send_rate_limited', jid: maskPhone(jid), reason: sendResult.reason });
@@ -160,53 +206,56 @@ export async function runGraph(jid, inboundText) {
   } else if (mode === 'auto' && result.error?.startsWith('guardrail')) {
     action = 'guardrail_blocked';
   } else if (mode === 'suggest' && result.output && !result.error?.startsWith('guardrail')) {
-    // Phase 5: suggest-mode — stuur Telegram notificatie in plaats van WhatsApp bericht
+    // Phase 5: suggest-mode — Telegram notification
+    const bookingResult = result.results?.find(r => r.node === 'bookingLink' && r.sms_params);
+    const smsParams = bookingResult?.sms_params ?? null;
     const suggestionId = insertPendingSuggestion({
       jid,
       proposed_message: result.output,
       inbound_message: inboundText,
       patient_name: result.patient?.fullName ?? jid.split('@')[0],
       watch_entry_id: null,
+      sms_params: smsParams ? JSON.stringify(smsParams) : null,
     });
 
-    // Supersede any existing pending for this JID (cancels escalation timer, edits Telegram msg)
     await replacePendingForJid(jid, suggestionId);
 
-    // Determine primary recipient
     const MOUMEN_CHAT_ID = process.env.MOUMEN_TELEGRAM_ID ? Number(process.env.MOUMEN_TELEGRAM_ID) : null;
     const ROGIER_CHAT_ID = Number(process.env.ROGIER_TELEGRAM_ID ?? "6237130967");
     const primaryChatId = MOUMEN_CHAT_ID ?? ROGIER_CHAT_ID;
 
+    // FIX: Pass patient context to Telegram notification
     const msgId = await sendSuggestNotification({
       chatId: primaryChatId,
       suggestionId,
       patientName: result.patient?.fullName ?? jid.split('@')[0],
       customerMsg: inboundText,
       proposedReply: result.output,
+      patientContext: result.patient ?? null,
     });
 
     if (msgId) {
       if (MOUMEN_CHAT_ID) {
         setMoumenMsgId(suggestionId, msgId);
       } else {
-        // No Moumen configured — Rogier is primary, skip escalation
         setRogierMsgId(suggestionId, msgId);
       }
     }
 
-    // Schedule escalation only if Moumen is primary (otherwise Rogier already got it)
     if (MOUMEN_CHAT_ID && msgId) {
+      // FIX: Pass patient context to escalation timer
       scheduleEscalation(suggestionId, {
         patientName: result.patient?.fullName ?? jid.split('@')[0],
         customerMsg: inboundText,
         proposedReply: result.output,
+        patientContext: result.patient ?? null,
       });
     }
 
     action = 'suggest_pending';
   }
 
-  // Build watch entry compatible with db.js insertEntry prepared statement
+  // Build watch entry
   const entry = {
     ts,
     jid: maskPhone(jid),
@@ -235,6 +284,28 @@ export async function runGraph(jid, inboundText) {
   } catch (dbErr) {
     logEvent({ type: "db_error", error: dbErr.message });
   }
+
+  // Langfuse spans
+  try {
+    for (const r of result.results ?? []) {
+      trace.span({
+        name: r.node,
+        output: { text: r.text?.slice(0, 500), type: r.type },
+        metadata: { error_code: r.error ?? null, sms: !!r.sms_params },
+      });
+    }
+    trace.update({
+      output: result.output ?? null,
+      metadata: {
+        action,
+        node_trace: entry.node_trace,
+        latency_ms: entry.latency_ms,
+        model: entry.model,
+        intent: entry.intent,
+      },
+    });
+    langfuse.flushAsync().catch(() => {});
+  } catch (_) {}
 
   return entry;
 }

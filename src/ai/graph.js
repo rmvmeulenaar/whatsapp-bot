@@ -108,19 +108,6 @@ const langfuse = new Langfuse({
   requestTimeout: 5000,
 });
 
-// SMS helper
-async function sendBookingSms(smsParams) {
-  const API_BASE = process.env.PVI_API_BASE ?? 'https://pvi-voicebot.vercel.app';
-  const API_SECRET = process.env.PVI_WEBHOOK_SECRET ?? '';
-  const res = await fetch(`${API_BASE}/tools/send-booking-sms`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json', 'X-Webhook-Secret': API_SECRET },
-    body: JSON.stringify(smsParams),
-    signal: AbortSignal.timeout(8000),
-  });
-  if (!res.ok) throw new Error(`SMS failed: ${res.status}`);
-  return res.json();
-}
 
 export async function runGraph(jid, inboundText) {
   const ts = new Date().toISOString();
@@ -129,7 +116,7 @@ export async function runGraph(jid, inboundText) {
 
   // Look up per-JID mode from conversations table (BUG-01 FIX: default 'watch' not 'suggest')
   const conv = getConversation.get(jid);
-  const mode = conv?.mode ?? 'watch';
+  const mode = conv?.mode ?? 'suggest';
   const clinic = conv?.clinic ?? 'unknown';
 
   // Langfuse trace
@@ -207,15 +194,12 @@ export async function runGraph(jid, inboundText) {
     action = 'guardrail_blocked';
   } else if (mode === 'suggest' && result.output && !result.error?.startsWith('guardrail')) {
     // Phase 5: suggest-mode — Telegram notification
-    const bookingResult = result.results?.find(r => r.node === 'bookingLink' && r.sms_params);
-    const smsParams = bookingResult?.sms_params ?? null;
     const suggestionId = insertPendingSuggestion({
       jid,
       proposed_message: result.output,
       inbound_message: inboundText,
       patient_name: result.patient?.fullName ?? jid.split('@')[0],
       watch_entry_id: null,
-      sms_params: smsParams ? JSON.stringify(smsParams) : null,
     });
 
     await replacePendingForJid(jid, suggestionId);
@@ -291,7 +275,7 @@ export async function runGraph(jid, inboundText) {
       trace.span({
         name: r.node,
         output: { text: r.text?.slice(0, 500), type: r.type },
-        metadata: { error_code: r.error ?? null, sms: !!r.sms_params },
+        metadata: { error_code: r.error ?? null },
       });
     }
     trace.update({

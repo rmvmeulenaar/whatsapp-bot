@@ -15,6 +15,17 @@ import { cancelEscalation } from "../integrations/telegram.js";
 // FIX 3: import wasBotSent to skip takeover for bot-sent fromMe messages
 import { wasBotSent } from "./outbound.js";
 
+// TEAM-01: block team member DMs (filled by Rogier in .env)
+const TEAM_JIDS = new Set(
+  (process.env.TEAM_JIDS ?? "").split(",").map(j => j.trim()).filter(Boolean)
+);
+
+// BUG-05: block Clinicminds reminder messages (phone-based)
+const CLINICMINDS_REMINDER_NUMBERS = new Set(
+  (process.env.CLINICMINDS_REMINDER_NUMBERS ?? "").split(",").map(j => j.trim()).filter(Boolean)
+);
+const REMINDER_PATTERN = /(?:uw afspraak|your appointment|herinnering|reminder|bevestig)/i;
+
 // TTL-based deduplicator prevents double-processing on reconnect (Pitfall #4)
 // Uses Map (not Set) so entries expire — prevents unbounded memory growth (Pitfall #11)
 class MessageDeduplicator {
@@ -51,18 +62,19 @@ export function createInboundHandler(onMessageEvent) {
     if (type !== "notify" && type !== "append") return;
 
     for (const msg of messages) {
-      await processMessage(msg, onMessageEvent);
+      await processMessage(msg, type, onMessageEvent);
     }
   };
 }
 
-async function processMessage(msg, onMessageEvent) {
+async function processMessage(msg, type, onMessageEvent) {
   const remoteJid = msg.key.remoteJid;
   const id = msg.key.id;
 
   // fromMe check — als team zelf antwoordt, set takeover flag (Phase 2)
   // FIX 3: skip takeover if this fromMe was sent by the bot itself (not a human)
   if (msg.key.fromMe) {
+    if (type === 'append') return; // TEAM-02: ignore history replay on reconnect
     if (remoteJid && !remoteJid.endsWith("@broadcast") && !remoteJid.endsWith("@g.us")) {
       if (wasBotSent(remoteJid)) {
         // Bot-sent echo — ignore, do NOT set takeover
@@ -102,6 +114,18 @@ async function processMessage(msg, onMessageEvent) {
   // Filter 2: Skip group messages (Phase 1 policy: groups disabled)
   // PVI team group 120363301130072756@g.us must NOT trigger bot
   if (remoteJid.endsWith("@g.us")) return;
+
+  // TEAM-01: skip team member DMs
+  if (TEAM_JIDS.size > 0 && TEAM_JIDS.has(remoteJid)) {
+    logEvent({ type: "team_message_skipped", jid: maskPhone(remoteJid) });
+    return;
+  }
+
+  // BUG-05: skip Clinicminds reminder messages (phone-based)
+  if (CLINICMINDS_REMINDER_NUMBERS.size > 0 && CLINICMINDS_REMINDER_NUMBERS.has(remoteJid)) {
+    logEvent({ type: "clinicminds_reminder_skipped", jid: maskPhone(remoteJid) });
+    return;
+  }
 
   // Deduplication by jid+messageId pair (Pitfall #4)
   const dedupeKey = `${remoteJid}:${id}`;

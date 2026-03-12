@@ -83,6 +83,15 @@ export const getConversation = db.prepare(
   `SELECT mode, clinic, takeover_until FROM conversations WHERE jid = ?`
 );
 
+// === BUG-02: Takeover persistence — write/read takeover_until per JID ===
+export const writeTakeoverUntil = db.prepare(
+  `UPDATE conversations SET takeover_until = @takeover_until WHERE jid = @jid`
+);
+
+export const getTakeoverUntil = db.prepare(
+  `SELECT takeover_until FROM conversations WHERE jid = ?`
+);
+
 export const upsertConversation = db.prepare(`
   INSERT INTO conversations (jid, mode, clinic, takeover_until)
   VALUES (@jid, @mode, @clinic, @takeover_until)
@@ -122,8 +131,8 @@ try {
 
 // === Phase 5: prepared statements for pending_suggestions ===
 const insertPending = db.prepare(`
-  INSERT INTO pending_suggestions (jid, proposed_message, inbound_message, patient_name, status, created_at)
-  VALUES (@jid, @proposed_message, @inbound_message, @patient_name, 'pending', @created_at)
+  INSERT INTO pending_suggestions (jid, proposed_message, inbound_message, patient_name, status, created_at, sms_params)
+  VALUES (@jid, @proposed_message, @inbound_message, @patient_name, 'pending', @created_at, @sms_params)
 `);
 const approvePending = db.prepare(`
   UPDATE pending_suggestions SET status = 'approved', approved_by = @approvedBy, edited_message = @editedMessage
@@ -168,8 +177,8 @@ const finalizePendingApproval = db.prepare(`
 `);
 
 // === Phase 5: export functions for pending_suggestions ===
-export function insertPendingSuggestion({ jid, proposed_message, inbound_message, patient_name, watch_entry_id }) {
-  const result = insertPending.run({ jid, proposed_message, inbound_message, patient_name: patient_name ?? null, created_at: Date.now() });
+export function insertPendingSuggestion({ jid, proposed_message, inbound_message, patient_name, watch_entry_id, sms_params }) {
+  const result = insertPending.run({ jid, proposed_message, inbound_message, patient_name: patient_name ?? null, created_at: Date.now(), sms_params: sms_params ?? null });
   if (watch_entry_id) {
     db.prepare('UPDATE pending_suggestions SET watch_entry_id = ? WHERE id = ?').run(watch_entry_id, result.lastInsertRowid);
   }
@@ -242,6 +251,9 @@ const setPendingBookingStmt = db.prepare(`
 const clearPendingBookingStmt = db.prepare(`DELETE FROM pending_bookings WHERE jid = @jid`);
 
 const BOOKING_TTL_MS = 30 * 60 * 1000; // 30 minuten
+
+// BUG-03: Clean stale pending_bookings at startup (30 min TTL)
+db.prepare(`DELETE FROM pending_bookings WHERE created_at < ?`).run(Date.now() - BOOKING_TTL_MS);
 
 export function getPendingBooking(jid) {
   const row = getPendingBookingStmt.get({ jid });

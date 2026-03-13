@@ -106,6 +106,16 @@
     .bubble.inbound { background: #e9ecef; color: #333; border-bottom-left-radius: 2px; }
     .bubble.reply { background: #d4edda; color: #155724; border-bottom-right-radius: 2px; }
     .bubble .bubble-meta { font-size: 10px; color: #888; margin-top: 4px; }
+    .bubble-row.moumen { justify-content: flex-end; }
+    .bubble.moumen { background: #dcf8c6; color: #1a5d1a; border-bottom-right-radius: 2px; }
+    .bubble.moumen .bubble-meta { color: #4a8c4a; }
+    .intent-chips { display: flex; gap: 3px; flex-wrap: wrap; margin-top: 3px; }
+    .intent-chip { display: inline-block; padding: 1px 6px; border-radius: 8px; font-size: 10px; font-weight: 600; background: #e8f0fe; color: #1a73e8; }
+    .bubble-feedback { display: flex; gap: 4px; margin-top: 4px; }
+    .bubble-fb-btn { background: none; border: 1px solid #ddd; border-radius: 4px; padding: 1px 5px; font-size: 10px; cursor: pointer; color: #888; }
+    .bubble-fb-btn:hover { background: #f0f0f0; }
+    .bubble-fb-btn.active-good { background: #d4edda; color: #155724; border-color: #28a745; }
+    .bubble-fb-btn.active-bad { background: #f8d7da; color: #721c24; border-color: #dc3545; }
     .mode-save-btn { padding: 3px 10px; background: #1a73e8; color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 12px; }
     .mode-save-btn:hover { background: #1557b0; }
     .mode-saved { color: #28a745; font-size: 11px; }
@@ -553,11 +563,34 @@
         const messages = await res.json();
         if (!messages.length) { msgs.innerHTML = '<div class="conv-empty">Geen berichten gevonden</div>'; return; }
         msgs.innerHTML = messages.map(m => {
-          const hasBotReply = m.proposed_reply && m.proposed_reply.trim().length > 0;
           const timeStr = m.ts ? new Date(m.ts).toLocaleTimeString('nl-NL', { hour: '2-digit', minute: '2-digit' }) : '';
-          let html = `<div class="bubble-row inbound"><div class="bubble inbound">${escHtml(m.inbound || '')}<div class="bubble-meta">${timeStr} · ${escHtml(m.intent || '-')}</div></div></div>`;
+
+          // Phase 10: Moumen's direct WhatsApp reply (is_inbound = 0, source = moumen)
+          if (m.is_inbound === 0) {
+            return `<div class="bubble-row moumen"><div class="bubble moumen">${escHtml(m.text || '')}<div class="bubble-meta">Moumen · ${timeStr}</div></div></div>`;
+          }
+
+          // Parse intent labels (stored as JSON string like '{"labels":["prijs","vestiging"]}' or plain string)
+          let intentLabels = [];
+          try {
+            const intentObj = JSON.parse(m.intent || '{}');
+            intentLabels = intentObj.labels ?? [];
+          } catch {
+            if (m.intent && m.intent !== '-') intentLabels = [m.intent];
+          }
+          const intentChips = intentLabels.length > 0
+            ? `<div class="intent-chips">${intentLabels.map(l => `<span class="intent-chip">${escHtml(l)}</span>`).join('')}</div>`
+            : '';
+
+          const feedbackBtns = m.id ? `<div class="bubble-feedback">
+            <button class="bubble-fb-btn ${m.feedback === 'good' ? 'active-good' : ''}" onclick="submitEntryFeedback(${m.id}, 'good', this)" title="Goed">👍</button>
+            <button class="bubble-fb-btn ${m.feedback === 'bad' ? 'active-bad' : ''}" onclick="submitEntryFeedback(${m.id}, 'bad', this)" title="Fout">👎</button>
+          </div>` : '';
+
+          const hasBotReply = m.proposed_reply && m.proposed_reply.trim().length > 0;
+          let html = `<div class="bubble-row inbound"><div class="bubble inbound">${escHtml(m.text || m.inbound || '')}${intentChips}${feedbackBtns}<div class="bubble-meta">${timeStr}</div></div></div>`;
           if (hasBotReply) {
-            html += `<div class="bubble-row reply"><div class="bubble reply">${escHtml(m.proposed_reply)}<div class="bubble-meta">${escHtml(m.action || '')}</div></div></div>`;
+            html += `<div class="bubble-row reply"><div class="bubble reply">${escHtml(m.proposed_reply)}<div class="bubble-meta">${escHtml(m.action || '')} · Bot</div></div></div>`;
           }
           return html;
         }).join('');
@@ -583,6 +616,21 @@
           renderConversationList();
         }
       } catch (e) { alert('Opslaan mislukt: ' + e.message); }
+    }
+    async function submitEntryFeedback(id, feedback, btn) {
+      try {
+        const res = await fetch('/api/entries/' + id + '/feedback', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ feedback }),
+        });
+        const data = await res.json();
+        if (data.ok) {
+          const row = btn.closest('.bubble-feedback');
+          row.querySelectorAll('.bubble-fb-btn').forEach(b => { b.classList.remove('active-good', 'active-bad'); });
+          btn.classList.add(feedback === 'good' ? 'active-good' : 'active-bad');
+        }
+      } catch (e) { console.error('feedback failed', e); }
     }
     function escAttr(s) { return String(s).replace(/"/g, '&quot;').replace(/'/g, '&#39;'); }
 

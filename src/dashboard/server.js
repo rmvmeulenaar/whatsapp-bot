@@ -4,6 +4,7 @@ import { fileURLToPath } from "url";
 import { dirname, join } from "path";
 import { createHmac, randomBytes } from "crypto";
 import {
+  db,
   getRecentEntries, updateFeedback, subscribers,
   getAllPendingSuggestions, getPendingSuggestion,
   rejectSuggestion, claimSuggestion, resetSuggestionToPending,
@@ -321,9 +322,30 @@ export function startDashboard() {
     .get("/api/conversations/:jid/messages", (req, res) => {
       if (!requireAuth(req, res)) return;
       const jid = decodeURIComponent(req.params.jid);
-      const messages = getConversationMessages.all(jid);
+      // Phase 10: UNION query needs jid twice (watch_entries + outgoing_messages)
+      const messages = getConversationMessages.all(jid, jid);
       res.setHeader("Content-Type", "application/json");
       res.end(JSON.stringify(messages));
+    })
+    .post("/api/entries/:id/feedback", async (req, res) => {
+      if (!requireAuth(req, res)) return;
+      const entryId = Number(req.params.id);
+      let body = "";
+      for await (const chunk of req) body += chunk;
+      try {
+        const { feedback } = JSON.parse(body); // 'good' | 'bad' | 'irrelevant'
+        if (!["good", "bad", "irrelevant"].includes(feedback)) {
+          res.statusCode = 400;
+          res.end(JSON.stringify({ ok: false, error: "Invalid feedback value" }));
+          return;
+        }
+        db.prepare("UPDATE watch_entries SET feedback = ? WHERE id = ?").run(feedback, entryId);
+        res.setHeader("Content-Type", "application/json");
+        res.end(JSON.stringify({ ok: true }));
+      } catch (err) {
+        res.statusCode = 400;
+        res.end(JSON.stringify({ ok: false, error: err.message }));
+      }
     })
     .post("/api/conversations/:jid/mode", async (req, res) => {
       if (!requireAuth(req, res)) return;

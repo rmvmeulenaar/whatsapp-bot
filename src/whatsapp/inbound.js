@@ -9,7 +9,7 @@ import { setTakeover, isInTakeover } from "./takeover.js";
 import { maskPhone } from "../integrations/clinicminds.js";
 
 // Phase 5: suggest-mode takeover imports
-import { getConversation, markSuggestionTakenOver, getExistingPending } from "../dashboard/db.js";
+import { getConversation, markSuggestionTakenOver, getExistingPending, insertOutgoingMessage, getLastWatchEntry } from "../dashboard/db.js";
 import { cancelEscalation } from "../integrations/telegram.js";
 
 // FIX 3: import wasBotSent to skip takeover for bot-sent fromMe messages
@@ -103,6 +103,24 @@ async function processMessage(msg, type, onMessageEvent) {
           console.error("[inbound] suggest takeover check failed:", err.message);
         }
       }
+    }
+
+    // Phase 10: log Moumen's direct WhatsApp reply for few-shot learning
+    try {
+      const text = extractText(normalizeMessageContent(msg.message));
+      if (text) {
+        const lastEntry = getLastWatchEntry.get(remoteJid);
+        insertOutgoingMessage.run({
+          jid: remoteJid,
+          ts: new Date((msg.messageTimestamp?.toNumber?.() ?? msg.messageTimestamp ?? 0) * 1000).toISOString(),
+          text,
+          source: 'moumen',
+          watch_entry_id: lastEntry?.id ?? null
+        });
+        logEvent({ type: "fromMe_logged", jid: maskPhone(remoteJid) });
+      }
+    } catch (err) {
+      console.error("[inbound] fromMe logging failed:", err.message);
     }
     return; // Niet door pipeline sturen
   }

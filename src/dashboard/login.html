@@ -1,0 +1,432 @@
+<!DOCTYPE html>
+<html lang="nl">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Molty — WhatsApp Dashboard</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,400;0,500;0,600;1,400&family=Inter:wght@300;400;500&display=swap" rel="stylesheet">
+  <style>
+    :root {
+      --bg-primary: #FDFBF9;
+      --bg-card: #FFFFFF;
+      --text-primary: #1C1917;
+      --text-secondary: #78716C;
+      --text-muted: #A8A29E;
+      --accent: #8B7355;
+      --accent-light: #C4A882;
+      --whatsapp: #25D366;
+      --whatsapp-dark: #128C7E;
+      --border: rgba(28, 25, 23, 0.06);
+      --shadow-lg: 0 24px 64px rgba(28, 25, 23, 0.08);
+      --font-display: 'Cormorant Garamond', Georgia, serif;
+      --font-body: 'Inter', -apple-system, sans-serif;
+    }
+
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      font-family: var(--font-body);
+      background: var(--bg-primary);
+      color: var(--text-primary);
+      min-height: 100vh;
+      display: flex;
+      overflow: hidden;
+    }
+
+    /* ── Left: Photo panel ──────────────────────────── */
+    .photo-panel {
+      flex: 1;
+      position: relative;
+      background: #1C1917;
+      display: flex;
+      flex-direction: column;
+      justify-content: flex-end;
+      overflow: hidden;
+    }
+
+    .photo-panel img {
+      position: absolute;
+      inset: 0;
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+      opacity: 0.7;
+    }
+
+    /* Gradient overlay for text readability */
+    .photo-panel::after {
+      content: '';
+      position: absolute;
+      inset: 0;
+      background:
+        linear-gradient(to top, rgba(28, 25, 23, 0.85) 0%, rgba(28, 25, 23, 0.3) 40%, transparent 70%),
+        linear-gradient(to right, rgba(28, 25, 23, 0.2) 0%, transparent 50%);
+      pointer-events: none;
+    }
+
+    .photo-content {
+      position: relative;
+      z-index: 2;
+      padding: 48px;
+      animation: slideUp 0.8s ease-out 0.4s both;
+    }
+
+    @keyframes slideUp {
+      from { opacity: 0; transform: translateY(20px); }
+      to { opacity: 1; transform: translateY(0); }
+    }
+
+    .photo-content .wa-badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      background: rgba(37, 211, 102, 0.15);
+      border: 1px solid rgba(37, 211, 102, 0.25);
+      border-radius: 100px;
+      padding: 6px 14px 6px 10px;
+      margin-bottom: 20px;
+      backdrop-filter: blur(8px);
+    }
+
+    .wa-badge svg {
+      width: 18px;
+      height: 18px;
+      flex-shrink: 0;
+    }
+
+    .wa-badge span {
+      font-size: 12px;
+      font-weight: 500;
+      color: var(--whatsapp);
+      letter-spacing: 0.02em;
+    }
+
+    .photo-content h2 {
+      font-family: var(--font-display);
+      font-size: 36px;
+      font-weight: 400;
+      color: white;
+      line-height: 1.2;
+      margin-bottom: 12px;
+    }
+
+    .photo-content p {
+      font-size: 14px;
+      font-weight: 300;
+      color: rgba(255,255,255,0.6);
+      max-width: 380px;
+      line-height: 1.6;
+    }
+
+    .photo-stats {
+      display: flex;
+      gap: 32px;
+      margin-top: 28px;
+      padding-top: 24px;
+      border-top: 1px solid rgba(255,255,255,0.1);
+    }
+
+    .stat {
+      display: flex;
+      flex-direction: column;
+      gap: 2px;
+    }
+
+    .stat .value {
+      font-size: 20px;
+      font-weight: 500;
+      color: white;
+      font-family: var(--font-display);
+    }
+
+    .stat .label {
+      font-size: 11px;
+      font-weight: 300;
+      color: rgba(255,255,255,0.45);
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+    }
+
+    /* ── Right: Login panel ─────────────────────────── */
+    .login-panel {
+      width: 480px;
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      padding: 48px;
+      position: relative;
+    }
+
+    /* Subtle texture */
+    .login-panel::before {
+      content: '';
+      position: absolute;
+      inset: 0;
+      opacity: 0.25;
+      background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)' opacity='0.04'/%3E%3C/svg%3E");
+      pointer-events: none;
+    }
+
+    .login-inner {
+      position: relative;
+      z-index: 1;
+      width: 100%;
+      max-width: 340px;
+      animation: fadeIn 0.7s ease-out 0.2s both;
+    }
+
+    @keyframes fadeIn {
+      from { opacity: 0; transform: translateY(10px); }
+      to { opacity: 1; transform: translateY(0); }
+    }
+
+    /* Logo */
+    .logo-mark {
+      width: 48px;
+      height: 48px;
+      border-radius: 14px;
+      background: linear-gradient(135deg, var(--accent) 0%, var(--accent-light) 100%);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      margin-bottom: 32px;
+      box-shadow: 0 2px 8px rgba(139, 115, 85, 0.2);
+    }
+
+    .logo-mark svg {
+      width: 24px;
+      height: 24px;
+      color: white;
+    }
+
+    .login-inner h1 {
+      font-family: var(--font-display);
+      font-size: 30px;
+      font-weight: 500;
+      color: var(--text-primary);
+      margin-bottom: 6px;
+      letter-spacing: -0.01em;
+    }
+
+    .login-inner .subtitle {
+      font-size: 14px;
+      font-weight: 300;
+      color: var(--text-secondary);
+      margin-bottom: 40px;
+    }
+
+    /* Divider */
+    .divider {
+      display: flex;
+      align-items: center;
+      gap: 14px;
+      margin-bottom: 28px;
+    }
+
+    .divider::before,
+    .divider::after {
+      content: '';
+      flex: 1;
+      height: 1px;
+      background: var(--border);
+    }
+
+    .divider span {
+      font-size: 11px;
+      font-weight: 400;
+      color: var(--text-muted);
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+    }
+
+    /* Google button */
+    .google-btn-wrapper {
+      display: flex;
+      justify-content: center;
+      padding: 4px 0;
+    }
+
+    /* Error */
+    .error {
+      background: #FEF2F2;
+      color: #991B1B;
+      border: 1px solid #FECACA;
+      border-radius: 10px;
+      padding: 12px 16px;
+      font-size: 13px;
+      margin-top: 24px;
+      display: none;
+      animation: errorIn 0.3s ease-out;
+    }
+
+    .error.show { display: block; }
+
+    @keyframes errorIn {
+      from { opacity: 0; transform: translateY(-4px); }
+      to { opacity: 1; transform: translateY(0); }
+    }
+
+    /* Footer */
+    .login-footer {
+      position: absolute;
+      bottom: 32px;
+      left: 0;
+      right: 0;
+      text-align: center;
+    }
+
+    .login-footer p {
+      font-size: 11px;
+      font-weight: 300;
+      color: var(--text-muted);
+      letter-spacing: 0.01em;
+    }
+
+    .login-footer .brands {
+      margin-top: 4px;
+      font-size: 10px;
+      color: var(--text-muted);
+      opacity: 0.6;
+      letter-spacing: 0.06em;
+      text-transform: uppercase;
+    }
+
+    /* ── Responsive: mobile ─────────────────────────── */
+    @media (max-width: 900px) {
+      body { flex-direction: column; }
+
+      .photo-panel {
+        flex: none;
+        height: 280px;
+        min-height: 280px;
+      }
+
+      .photo-content { padding: 28px; }
+      .photo-content h2 { font-size: 26px; }
+      .photo-stats { display: none; }
+
+      .login-panel {
+        width: 100%;
+        min-height: auto;
+        flex: 1;
+        padding: 40px 24px 80px;
+      }
+
+      .login-footer {
+        bottom: 20px;
+      }
+    }
+
+    @media (max-width: 480px) {
+      .photo-panel { height: 220px; min-height: 220px; }
+      .photo-content h2 { font-size: 22px; }
+      .login-inner h1 { font-size: 26px; }
+    }
+  </style>
+</head>
+<body>
+
+  <!-- Left: Photo panel -->
+  <div class="photo-panel">
+    <img src="/assets/clinic-bg.png"
+         alt="Kliniek receptie"
+         loading="eager" />
+    <div class="photo-content">
+      <div class="wa-badge">
+        <!-- WhatsApp icon -->
+        <svg viewBox="0 0 24 24" fill="#25D366">
+          <path d="M17.472 14.382c-.297-.149-1.758-.867-2.03-.967-.273-.099-.471-.148-.67.15-.197.297-.767.966-.94 1.164-.173.199-.347.223-.644.075-.297-.15-1.255-.463-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.298-.347.446-.52.149-.174.198-.298.298-.497.099-.198.05-.371-.025-.52-.075-.149-.669-1.612-.916-2.207-.242-.579-.487-.5-.669-.51-.173-.008-.371-.01-.57-.01-.198 0-.52.074-.792.372-.272.297-1.04 1.016-1.04 2.479 0 1.462 1.065 2.875 1.213 3.074.149.198 2.096 3.2 5.077 4.487.709.306 1.262.489 1.694.625.712.227 1.36.195 1.871.118.571-.085 1.758-.719 2.006-1.413.248-.694.248-1.289.173-1.413-.074-.124-.272-.198-.57-.347m-5.421 7.403h-.004a9.87 9.87 0 01-5.031-1.378l-.361-.214-3.741.982.998-3.648-.235-.374a9.86 9.86 0 01-1.51-5.26c.001-5.45 4.436-9.884 9.888-9.884 2.64 0 5.122 1.03 6.988 2.898a9.825 9.825 0 012.893 6.994c-.003 5.45-4.437 9.884-9.885 9.884m8.413-18.297A11.815 11.815 0 0012.05 0C5.495 0 .16 5.335.157 11.892c0 2.096.547 4.142 1.588 5.945L.057 24l6.305-1.654a11.882 11.882 0 005.683 1.448h.005c6.554 0 11.89-5.335 11.893-11.893a11.821 11.821 0 00-3.48-8.413z"/>
+        </svg>
+        <span>WhatsApp Klantenservice</span>
+      </div>
+      <h2>Berichten beheren,<br>afspraken inplannen</h2>
+      <p>Beheer inkomende WhatsApp-berichten, bekijk AI-voorstellen en plan direct afspraken voor patiënten.</p>
+      <div class="photo-stats">
+        <div class="stat">
+          <span class="value">24/7</span>
+          <span class="label">Bereikbaar</span>
+        </div>
+        <div class="stat">
+          <span class="value">AI</span>
+          <span class="label">Suggesties</span>
+        </div>
+        <div class="stat">
+          <span class="value">Direct</span>
+          <span class="label">Booking links</span>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Right: Login panel -->
+  <div class="login-panel">
+    <div class="login-inner">
+      <div class="logo-mark">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z"/>
+        </svg>
+      </div>
+
+      <h1>Molty Dashboard</h1>
+      <p class="subtitle">WhatsApp klantenservice beheer</p>
+
+      <div class="divider"><span>Inloggen met Google</span></div>
+
+      <div class="google-btn-wrapper">
+        <div id="g_id_onload"
+          data-client_id="__GOOGLE_CLIENT_ID__"
+          data-callback="handleCredentialResponse"
+          data-auto_prompt="false">
+        </div>
+        <div class="g_id_signin"
+          data-type="standard"
+          data-size="large"
+          data-theme="outline"
+          data-text="sign_in_with"
+          data-shape="pill"
+          data-logo_alignment="left"
+          data-locale="nl">
+        </div>
+      </div>
+
+      <div id="error" class="error"></div>
+    </div>
+
+    <div class="login-footer">
+      <p>Alleen geautoriseerde accounts hebben toegang</p>
+      <p class="brands">Radiance Clinic &middot; Praktijk voor Injectables</p>
+    </div>
+  </div>
+
+  <script src="https://accounts.google.com/gsi/client" async defer></script>
+  <script>
+    function handleCredentialResponse(response) {
+      const errorEl = document.getElementById('error');
+      errorEl.classList.remove('show');
+
+      fetch('/auth/google', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ credential: response.credential }),
+      })
+      .then(r => r.json())
+      .then(data => {
+        if (data.ok) {
+          window.location.href = '/';
+        } else {
+          errorEl.textContent = data.error || 'Toegang geweigerd.';
+          errorEl.classList.add('show');
+        }
+      })
+      .catch(() => {
+        errorEl.textContent = 'Verbindingsfout. Probeer opnieuw.';
+        errorEl.classList.add('show');
+      });
+    }
+  </script>
+</body>
+</html>

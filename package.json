@@ -16,6 +16,7 @@
     "better-sqlite3": "^12.6.2",
     "dotenv": "^17.3.1",
     "grammy": "^1.41.1",
+    "langfuse": "^3.38.6",
     "openai": "^6.25.0",
     "pino": "^10.3.1",
     "pino-roll": "latest",

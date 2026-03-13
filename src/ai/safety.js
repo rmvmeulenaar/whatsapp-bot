@@ -7,13 +7,18 @@ const INJECTION_PATTERNS = [
   /doe alsof je/i, /stel je voor dat je/i,
 ];
 
-const MEDICAL_PATTERNS = [
-  /(niet geschikt|gecontra-indiceerd|contra-indicatie)/i,
-  /(allergie|allergisch)/i, /(bijwerking|complicatie)/i,
-  /(diagnose|medisch advies)/i, /(bloedverdunner|medicijn|medicatie)/i,
-  /(zwanger|zwangerschap|borstvoeding)/i,
-  /(contraindicated|side effect|complication|medical advice)/i,
+// BUG 6 FIX: Medical patterns now require ADVISORY context, not just keyword presence.
+// "Botox is niet pijnlijk" = GROEN (informational), "Ik raad paracetamol aan" = ROOD (advice).
+const MEDICAL_ADVICE_PATTERNS = [
   /ik raad (aan|af)/i,
+  /je (moet|zou|kunt het beste)\b.{0,40}\b(nemen|gebruiken|stoppen|slikken|smeren)/i,
+  /niet geschikt voor (jou|u|mensen met)/i,
+  /gecontra-indiceerd/i,
+  /contra-indicatie voor (jou|u|jouw)/i,
+  /je hebt waarschijnlijk.{0,30}(nodig|last van)/i,
+  /diagnose.{0,20}(is|lijkt|zou kunnen)/i,
+  /dit (medicijn|medicatie) (helpt|werkt|is geschikt)/i,
+  /ik (stel|adviseer|schrijf).{0,20}(voor|aan)/i,
 ];
 
 const IDENTITY_CLAIM_PATTERNS = [
@@ -23,7 +28,9 @@ const IDENTITY_CLAIM_PATTERNS = [
   /als (uw|je) arts/i,
 ];
 
-const MAX_REPLY_LENGTH = 600;
+// BUG 7 FIX: Increased from 600 to 1500. LLM max_tokens=350 already limits output.
+// Multi-label answers (prijs + booking) and slot lists need more room.
+const MAX_REPLY_LENGTH = 1500;
 
 export function validateOutput(proposedReply, inboundText, priceWhitelist = []) {
   if (!proposedReply || typeof proposedReply !== "string") {
@@ -37,9 +44,9 @@ export function validateOutput(proposedReply, inboundText, priceWhitelist = []) 
     if (p.test(inboundText)) return { pass: false, classification: "ROOD", reason: "injection_attempt", text };
   }
 
-  // Layer 2: Medical content in reply
-  for (const p of MEDICAL_PATTERNS) {
-    if (p.test(text)) return { pass: false, classification: "ROOD", reason: "medical_content", text };
+  // Layer 2: Medical ADVICE in reply (not mere mention of medical words)
+  for (const p of MEDICAL_ADVICE_PATTERNS) {
+    if (p.test(text)) return { pass: false, classification: "ROOD", reason: "medical_advice", text };
   }
 
   // Layer 3: Identity claim in reply
@@ -60,7 +67,7 @@ export function validateOutput(proposedReply, inboundText, priceWhitelist = []) 
 
   // Layer 5: Length
   if (text.length > MAX_REPLY_LENGTH) {
-    return { pass: false, classification: "GEEL", reason: "too_long", text: text.slice(0, MAX_REPLY_LENGTH) + "…" };
+    return { pass: false, classification: "GEEL", reason: "too_long", text: text.slice(0, MAX_REPLY_LENGTH) + "\u2026" };
   }
 
   return { pass: true, classification: "GROEN", reason: null, text };

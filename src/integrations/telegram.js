@@ -33,26 +33,56 @@ function maskPhoneDisplay(jid) {
   return num.length > 6 ? num.slice(0, 4) + "****" + num.slice(-2) : num;
 }
 
-export async function sendSuggestNotification({ chatId, suggestionId, patientName, customerMsg, proposedReply, isEscalation = false }) {
+// ── Patient context formatter for Telegram notifications ─────────────────
+
+function formatPatientContext(patient) {
+  if (!patient) return "";
+  const lines = [];
+
+  // Critical flags — always show first
+  if (patient.notWelcome) lines.push("🚫 NIET WELKOM");
+  if (patient.blockOnlineBooking) lines.push("🔒 Online boeken geblokkeerd");
+
+  // Staff notes
+  if (patient.warning) lines.push(`⚠️ ${patient.warning}`);
+  if (patient.attention) lines.push(`📌 ${patient.attention}`);
+
+  // Visit history (compact)
+  const parts = [];
+  if (patient.visitCount > 0) parts.push(`${patient.visitCount} bezoeken`);
+  if (patient.totalSpend > 0) parts.push(`€${Math.round(patient.totalSpend)}`);
+  if (parts.length > 0) lines.push(`🏥 ${parts.join(" · ")}`);
+
+  // Location
+  if (patient.city) lines.push(`📍 ${patient.city}`);
+
+  // Last visit
+  if (patient.lastVisit) lines.push(`📅 Laatst: ${patient.lastVisit}`);
+
+  return lines.length > 0 ? lines.join("\n") + "\n" : "";
+}
+
+export async function sendSuggestNotification({ chatId, suggestionId, patientName, customerMsg, proposedReply, isEscalation = false, patientContext = null }) {
   if (!bot) { console.warn("[telegram] Bot not initialized (no TELEGRAM_BOT_TOKEN)"); return null; }
   const keyboard = new InlineKeyboard()
     .text("✅ Stuur", `approve:${suggestionId}`)
     .text("✏️ Bewerk", `edit:${suggestionId}`)
     .text("❌ Negeer", `reject:${suggestionId}`);
   const prefix = isEscalation ? "⏰ Moumen heeft niet gereageerd\n\n" : "";
-  const text = `${prefix}👤 ${patientName}\n💬 "${customerMsg}"\n\n🤖 Voorstel:\n${proposedReply}`;
+  const contextBlock = formatPatientContext(patientContext);
+  const text = `${prefix}👤 ${patientName}\n${contextBlock}\n💬 "${customerMsg}"\n\n🤖 Voorstel:\n${proposedReply}`;
   const sentMsg = await bot.api.sendMessage(chatId, text, { reply_markup: keyboard });
   return sentMsg.message_id;
 }
 
-export function scheduleEscalation(suggestionId, { patientName, customerMsg, proposedReply }) {
+export function scheduleEscalation(suggestionId, { patientName, customerMsg, proposedReply, patientContext = null }) {
   const handle = setTimeout(async () => {
     escalationTimers.delete(suggestionId);
     try {
       const row = getPendingSuggestion(suggestionId);
       if (!row || row.status !== "pending") return;
       const msgId = await sendSuggestNotification({
-        chatId: ROGIER_CHAT_ID, suggestionId, patientName, customerMsg, proposedReply, isEscalation: true
+        chatId: ROGIER_CHAT_ID, suggestionId, patientName, customerMsg, proposedReply, isEscalation: true, patientContext
       });
       if (msgId) setRogierMsgId(suggestionId, msgId);
     } catch (err) { console.error("[telegram] Escalation failed:", err.message); }
@@ -77,7 +107,6 @@ function recoverPendingEscalations() {
       const remaining = Math.max(0, ESCALATION_MS - elapsed);
       const meta = { patientName: row.patient_name ?? maskPhoneDisplay(row.jid), customerMsg: row.inbound_message, proposedReply: row.proposed_message };
       if (remaining > 0) {
-        // FIX 6: use remaining time instead of fresh 30-minute timer
         const handle = setTimeout(async () => {
           escalationTimers.delete(row.id);
           try {
@@ -91,7 +120,6 @@ function recoverPendingEscalations() {
         escalationTimers.set(row.id, handle);
         console.log(`[telegram] Recovered escalation ${row.id} (${Math.round(remaining/1000)}s remaining)`);
       } else {
-        // Already expired — escalate immediately
         (async () => {
           try {
             const r = getPendingSuggestion(row.id);
@@ -135,7 +163,6 @@ export function startTelegramBot() {
   bot.callbackQuery(/^approve:(\d+)$/, async (ctx) => {
     if (!isAuthorized(ctx)) { await ctx.answerCallbackQuery({ text: "Niet geautoriseerd." }); return; }
     const id = Number(ctx.match[1]);
-    // Atomic claim: pending → sending (prevents double-send race)
     const claimed = claimSuggestion(id);
     if (!claimed.ok) {
       await ctx.answerCallbackQuery({ text: "Al afgehandeld door iemand anders." });
@@ -155,9 +182,18 @@ export function startTelegramBot() {
       await ctx.answerCallbackQuery({ text: "Sturen mislukt: " + err.message });
       return;
     }
-    // Send succeeded — finalize (sending → approved)
     finalizeSuggestionApproval(id, ctx.from.id);
     cancelEscalation(id);
+    if (row.sms_params) {
+      const apiBase = process.env.PVI_API_BASE ?? 'https://pvi-voicebot.vercel.app';
+      const secret = process.env.PVI_WEBHOOK_SECRET ?? '';
+      fetch(`${apiBase}/tools/send-booking-sms`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'X-Webhook-Secret': secret },
+        body: row.sms_params,
+        signal: AbortSignal.timeout(8000),
+      }).catch(e => console.error('[telegram] SMS failed:', e.message));
+    }
     await ctx.answerCallbackQuery({ text: "✅ Verstuurd!" });
     try { await ctx.editMessageText((ctx.msg?.text ?? "") + "\n\n✅ Verstuurd door " + (ctx.from.first_name ?? "onbekend"), { reply_markup: new InlineKeyboard() }); } catch (_) {}
   });
@@ -189,7 +225,6 @@ export function startTelegramBot() {
     if (editState) {
       awaitingEdit.delete(ctx.chat.id);
       const { suggestionId, jid } = editState;
-      // Atomic claim: pending → sending (prevents double-send race)
       const claimed = claimSuggestion(suggestionId);
       if (!claimed.ok) { await ctx.reply("Al afgehandeld door iemand anders."); return; }
       try {

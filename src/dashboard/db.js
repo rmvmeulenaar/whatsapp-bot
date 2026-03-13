@@ -289,9 +289,23 @@ export const getConversationList = db.prepare(`
 `);
 
 // DASH-04: all messages for one JID (chat thread)
+// Phase 10: outgoing messages table (Moumen direct WhatsApp replies)
+db.exec(`CREATE TABLE IF NOT EXISTS outgoing_messages (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  jid TEXT NOT NULL,
+  ts TEXT NOT NULL,
+  text TEXT NOT NULL,
+  source TEXT NOT NULL DEFAULT 'moumen',
+  watch_entry_id INTEGER
+)`);
+
 export const getConversationMessages = db.prepare(`
-  SELECT id, ts, inbound, proposed_reply, action, intent, node_trace, latency_ms
+  SELECT id, ts, inbound AS text, 1 AS is_inbound, proposed_reply, action, intent, node_trace, latency_ms, feedback
   FROM watch_entries
+  WHERE jid = ?
+  UNION ALL
+  SELECT id, ts, text, 0 AS is_inbound, NULL AS proposed_reply, 'moumen_reply' AS action, NULL AS intent, NULL AS node_trace, NULL AS latency_ms, NULL AS feedback
+  FROM outgoing_messages
   WHERE jid = ?
   ORDER BY ts ASC
 `);
@@ -340,3 +354,13 @@ export const getLastMessagesForJid = db.prepare(`
 `);
 
 export { db };
+
+
+export const insertOutgoingMessage = db.prepare(
+  `INSERT INTO outgoing_messages (jid, ts, text, source, watch_entry_id)
+   VALUES (@jid, @ts, @text, @source, @watch_entry_id)`
+);
+
+export const getLastWatchEntry = db.prepare(
+  `SELECT id FROM watch_entries WHERE jid = ? ORDER BY ts DESC LIMIT 1`
+);

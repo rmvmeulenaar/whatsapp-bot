@@ -422,7 +422,7 @@ export function startDashboard() {
         const recentEntries = db.prepare("SELECT id, jid, ts FROM watch_entries ORDER BY id DESC LIMIT 5").all();
         const pendingCount = db.prepare("SELECT COUNT(*) as n FROM pending_suggestions WHERE status='pending'").get();
         const patientCacheSize = db.prepare("SELECT COUNT(*) as n FROM watch_entries WHERE jid NOT LIKE '%***%'").get();
-        const fixTs = '2026-03-13T00:00:00Z'; // When JID masking fix was deployed
+        const fixTs = '2026-03-13T19:44:00Z'; // When JID masking fix was deployed
         const newAfterFix = db.prepare("SELECT COUNT(*) as n FROM watch_entries WHERE ts > ?").get(fixTs);
         const newMasked = db.prepare("SELECT COUNT(*) as n FROM watch_entries WHERE ts > ? AND jid LIKE '%***%'").get(fixTs);
         res.setHeader("Content-Type", "application/json");

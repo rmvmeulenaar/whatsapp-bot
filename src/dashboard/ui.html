@@ -432,6 +432,7 @@
       try {
         const res = await fetch("/api/pending");
         const rows = await res.json();
+        allPendingRows = rows;
         const section = document.getElementById("pending-section");
         const list = document.getElementById("pending-list");
         const count = document.getElementById("pending-count");
@@ -528,6 +529,7 @@
     // ── DASH-04/05: Conversations ───────────────────────────────────────
     let conversations = [];
     let activeJid = null;
+    let allPendingRows = [];
     async function fetchConversations() {
       try {
         const res = await fetch('/api/conversations');
@@ -632,6 +634,7 @@
           return html;
         }).join('');
         msgs.scrollTop = msgs.scrollHeight;
+        renderThreadPendingCard(jid);
       } catch (e) { msgs.innerHTML = '<div class="conv-empty">Fout bij laden: ' + escHtml(e.message) + '</div>'; }
     }
     async function saveMode() {
@@ -670,6 +673,70 @@
       } catch (e) { console.error('feedback failed', e); }
     }
     function escAttr(s) { return String(s).replace(/"/g, '&quot;').replace(/'/g, '&#39;'); }
+
+    // ── Thread: inline pending suggestion card ──────────────────────────
+    function renderThreadPendingCard(jid) {
+      const existing = document.getElementById('thread-pending-card');
+      if (existing) existing.remove();
+
+      const pending = allPendingRows.find(r => r.jid === jid);
+      if (!pending) return;
+
+      const card = document.createElement('div');
+      card.id = 'thread-pending-card';
+      card.style.cssText = 'background:#1a1a2e;border-top:2px solid #f59e0b;padding:12px 16px;flex-shrink:0;';
+      card.innerHTML = `
+        <div style="color:#f59e0b;font-size:11px;font-weight:600;margin-bottom:6px;">⏳ Wacht op jouw goedkeuring</div>
+        <div id="thread-pending-proposal" style="color:#a5b4fc;white-space:pre-wrap;font-size:13px;margin-bottom:10px;">${escHtml(pending.proposed_message)}</div>
+        <div id="thread-pending-actions" style="display:flex;gap:8px;">
+          <button onclick="threadApprovePending(${pending.id})" style="background:#22c55e;color:white;border:none;padding:6px 16px;border-radius:4px;cursor:pointer;font-size:13px;">✅ Stuur</button>
+          <button onclick="threadStartEdit(${pending.id})" style="background:#3b82f6;color:white;border:none;padding:6px 16px;border-radius:4px;cursor:pointer;font-size:13px;">✏️ Bewerk</button>
+          <button onclick="threadRejectPending(${pending.id})" style="background:#ef4444;color:white;border:none;padding:6px 16px;border-radius:4px;cursor:pointer;font-size:13px;">❌ Negeer</button>
+        </div>
+        <div id="thread-pending-edit" style="display:none;margin-top:8px;">
+          <textarea id="thread-edit-text" style="width:100%;min-height:80px;background:#111;color:#e5e7eb;border:1px solid #3b82f6;border-radius:4px;padding:8px;font-size:13px;box-sizing:border-box;">${escHtml(pending.proposed_message)}</textarea>
+          <div style="margin-top:4px;display:flex;gap:8px;">
+            <button onclick="threadSendEdited(${pending.id})" style="background:#22c55e;color:white;border:none;padding:6px 16px;border-radius:4px;cursor:pointer;font-size:13px;">Stuur bewerkt</button>
+            <button onclick="threadCancelEdit()" style="background:#6b7280;color:white;border:none;padding:6px 12px;border-radius:4px;cursor:pointer;font-size:13px;">Annuleer</button>
+          </div>
+        </div>
+      `;
+      const threadEl = document.querySelector('.conv-thread');
+      if (threadEl) threadEl.appendChild(card);
+    }
+
+    async function threadApprovePending(id) {
+      const r = await fetch('/api/approve', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id }) });
+      const d = await r.json();
+      if (d.ok) { await loadPending(); if (activeJid) openThread(activeJid); }
+      else alert(d.error || 'Fout bij goedkeuren');
+    }
+
+    async function threadRejectPending(id) {
+      const r = await fetch('/api/reject', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id }) });
+      const d = await r.json();
+      if (d.ok) { await loadPending(); if (activeJid) openThread(activeJid); }
+      else alert(d.error || 'Fout bij afwijzen');
+    }
+
+    function threadStartEdit(id) {
+      document.getElementById('thread-pending-actions').style.display = 'none';
+      document.getElementById('thread-pending-edit').style.display = 'block';
+      document.getElementById('thread-edit-text').focus();
+    }
+
+    function threadCancelEdit() {
+      document.getElementById('thread-pending-actions').style.display = 'flex';
+      document.getElementById('thread-pending-edit').style.display = 'none';
+    }
+
+    async function threadSendEdited(id) {
+      const editedMessage = document.getElementById('thread-edit-text').value;
+      const r = await fetch('/api/approve', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id, editedMessage }) });
+      const d = await r.json();
+      if (d.ok) { await loadPending(); if (activeJid) openThread(activeJid); }
+      else alert(d.error || 'Fout bij versturen');
+    }
 
     loadPending();
     setInterval(loadPending, 5000);

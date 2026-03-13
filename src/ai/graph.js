@@ -24,7 +24,7 @@ import { sendText } from "../whatsapp/outbound.js";
 import { getSocket } from "../whatsapp/connection.js";
 
 // Phase 5: Telegram suggest-mode imports
-import { sendSuggestNotification, scheduleEscalation, replacePendingForJid } from "../integrations/telegram.js";
+import { sendSuggestNotification, replacePendingForJid } from "../integrations/telegram.js";
 import { insertPendingSuggestion, setMoumenMsgId, setRogierMsgId, getExistingPending } from "../dashboard/db.js";
 
 // BUG-06 FIX: Multilingual greeting node
@@ -206,35 +206,24 @@ export async function runGraph(jid, inboundText) {
 
     const MOUMEN_CHAT_ID = process.env.MOUMEN_TELEGRAM_ID ? Number(process.env.MOUMEN_TELEGRAM_ID) : null;
     const ROGIER_CHAT_ID = Number(process.env.ROGIER_TELEGRAM_ID ?? "6237130967");
-    const primaryChatId = MOUMEN_CHAT_ID ?? ROGIER_CHAT_ID;
 
-    // FIX: Pass patient context to Telegram notification
-    const msgId = await sendSuggestNotification({
-      chatId: primaryChatId,
+    const notifParams = {
       suggestionId,
       patientName: result.patient?.fullName ?? jid.split('@')[0],
       customerMsg: inboundText,
       proposedReply: result.output,
       patientContext: result.patient ?? null,
-    });
+    };
 
-    if (msgId) {
-      if (MOUMEN_CHAT_ID) {
-        setMoumenMsgId(suggestionId, msgId);
-      } else {
-        setRogierMsgId(suggestionId, msgId);
-      }
+    // Stuur naar Moumen (als beschikbaar)
+    if (MOUMEN_CHAT_ID) {
+      const moumenMsgId = await sendSuggestNotification({ chatId: MOUMEN_CHAT_ID, ...notifParams });
+      if (moumenMsgId) setMoumenMsgId(suggestionId, moumenMsgId);
     }
 
-    if (MOUMEN_CHAT_ID && msgId) {
-      // FIX: Pass patient context to escalation timer
-      scheduleEscalation(suggestionId, {
-        patientName: result.patient?.fullName ?? jid.split('@')[0],
-        customerMsg: inboundText,
-        proposedReply: result.output,
-        patientContext: result.patient ?? null,
-      });
-    }
+    // Stuur direct ook naar Rogier (CC — race-condition safe via claimSuggestion)
+    const rogierMsgId = await sendSuggestNotification({ chatId: ROGIER_CHAT_ID, ...notifParams });
+    if (rogierMsgId) setRogierMsgId(suggestionId, rogierMsgId);
 
     action = 'suggest_pending';
   }

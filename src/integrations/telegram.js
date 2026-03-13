@@ -62,6 +62,17 @@ function formatPatientContext(patient) {
   return lines.length > 0 ? lines.join("\n") + "\n" : "";
 }
 
+// ── Helper: edit beide Telegram berichten (Moumen + Rogier) ─────────────────
+async function editBothMessages(row, text) {
+  if (!bot) return;
+  if (MOUMEN_CHAT_ID && row?.telegram_msg_id_moumen) {
+    try { await bot.api.editMessageText(MOUMEN_CHAT_ID, row.telegram_msg_id_moumen, text, { reply_markup: new InlineKeyboard() }); } catch(_){}
+  }
+  if (row?.telegram_msg_id_rogier) {
+    try { await bot.api.editMessageText(ROGIER_CHAT_ID, row.telegram_msg_id_rogier, text, { reply_markup: new InlineKeyboard() }); } catch(_){}
+  }
+}
+
 export async function sendSuggestNotification({ chatId, suggestionId, patientName, customerMsg, proposedReply, isEscalation = false, patientContext = null }) {
   if (!bot) { console.warn("[telegram] Bot not initialized (no TELEGRAM_BOT_TOKEN)"); return null; }
   const keyboard = new InlineKeyboard()
@@ -195,7 +206,8 @@ export function startTelegramBot() {
       }).catch(e => console.error('[telegram] SMS failed:', e.message));
     }
     await ctx.answerCallbackQuery({ text: "✅ Verstuurd!" });
-    try { await ctx.editMessageText((ctx.msg?.text ?? "") + "\n\n✅ Verstuurd door " + (ctx.from.first_name ?? "onbekend"), { reply_markup: new InlineKeyboard() }); } catch (_) {}
+    const approveText = (ctx.msg?.text ?? "") + "\n\n✅ Verstuurd door " + (ctx.from.first_name ?? "onbekend");
+    await editBothMessages(row, approveText);
   });
 
   bot.callbackQuery(/^edit:(\d+)$/, async (ctx) => {
@@ -205,17 +217,20 @@ export function startTelegramBot() {
     if (!row || row.status !== "pending") { await ctx.answerCallbackQuery({ text: "Al afgehandeld." }); return; }
     awaitingEdit.set(ctx.chat.id, { suggestionId: id, jid: row.jid });
     await ctx.answerCallbackQuery();
-    await ctx.reply("✏️ Typ je aangepaste tekst:");
+    const preview = row.proposed_message.slice(0, 300) + (row.proposed_message.length > 300 ? "..." : "");
+    await ctx.reply(`✏️ Typ je aangepaste tekst.\n\nOrigineel:\n——\n${preview}\n——`);
   });
 
   bot.callbackQuery(/^reject:(\d+)$/, async (ctx) => {
     if (!isAuthorized(ctx)) { await ctx.answerCallbackQuery({ text: "Niet geautoriseerd." }); return; }
     const id = Number(ctx.match[1]);
+    const row = getPendingSuggestion(id);
     const result = rejectSuggestion(id, ctx.from.id);
     if (!result.ok) { await ctx.answerCallbackQuery({ text: "Al afgehandeld." }); return; }
     cancelEscalation(id);
     await ctx.answerCallbackQuery({ text: "❌ Genegeerd." });
-    try { await ctx.editMessageText((ctx.msg?.text ?? "") + "\n\n❌ Genegeerd door " + (ctx.from.first_name ?? "onbekend"), { reply_markup: new InlineKeyboard() }); } catch (_) {}
+    const rejectText = (ctx.msg?.text ?? "") + "\n\n❌ Genegeerd door " + (ctx.from.first_name ?? "onbekend");
+    await editBothMessages(row, rejectText);
   });
 
   // MESSAGE:TEXT handler (after callback handlers)
@@ -239,9 +254,14 @@ export function startTelegramBot() {
         await ctx.reply("Versturen mislukt: " + err.message);
         return;
       }
+      const editedRow = getPendingSuggestion(suggestionId);
       finalizeSuggestionApproval(suggestionId, ctx.from.id, ctx.message.text);
       cancelEscalation(suggestionId);
       await ctx.reply("✅ Aangepaste versie verstuurd.");
+      if (editedRow) {
+        const editDoneText = `✅ Aangepaste versie door ${ctx.from.first_name ?? "onbekend"}\n\n📝 ${ctx.message.text.slice(0, 200)}`;
+        await editBothMessages(editedRow, editDoneText);
+      }
       return;
     }
 

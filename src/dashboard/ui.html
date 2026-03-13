@@ -153,15 +153,16 @@
     </div>
     <div class="conv-thread">
       <div class="conv-thread-header" id="conv-thread-header" style="display:none;">
-        <span id="conv-thread-jid" style="font-family:monospace; font-size:11px;"></span>
+        <span id="conv-thread-jid" style="font-size:12px; font-weight:600; color:#333;"></span>
         <select id="conv-mode-select">
-          <option value="watch">Watch</option>
-          <option value="suggest">Suggest</option>
-          <option value="auto">Auto</option>
+          <option value="watch">Observeren</option>
+          <option value="suggest">Goedkeuring vereist</option>
+          <option value="auto">Automatisch</option>
         </select>
         <button class="mode-save-btn" onclick="saveMode()">Opslaan</button>
         <span class="mode-saved" id="mode-saved-msg" style="display:none;">Opgeslagen</span>
       </div>
+      <div id="conv-patient-panel" style="display:none; background:#eef2ff; border-bottom:1px solid #c7d2fe; padding:8px 14px; font-size:12px; color:#4338ca; align-items:center; flex-wrap:wrap; gap:6px;"></div>
       <div class="conv-messages" id="conv-messages">
         <div class="conv-empty">Selecteer een gesprek</div>
       </div>
@@ -265,7 +266,7 @@
 
       tr.innerHTML = `
         <td class="time">${formatTime(entry.ts)}</td>
-        <td class="jid">${entry.jid || '-'}</td>
+        <td class="jid">${escHtml(entry.display_name || formatJid(entry.jid || ''))}</td>
         <td><span class="intent-badge intent-${entry.intent || 'error'}">${entry.intent || '-'}</span></td>
         <td class="text-cell" onclick="this.classList.toggle('expanded')">
           <span class="short">${escHtml(inboundShort)}${inboundFull.length > 80 ? '...' : ''}</span>
@@ -440,7 +441,8 @@
         list.innerHTML = rows.map(row => `
           <div class="pending-card" data-id="${row.id}" style="border:1px solid #f59e0b; border-radius:8px; padding:12px; margin:8px 0; background:#1a1a2e; color:#e5e7eb;">
             <div style="margin-bottom:8px;">
-              <strong style="color:#60a5fa;">${escHtml(row.patient_name || row.jid)}</strong>
+              <strong style="color:#60a5fa;">${escHtml(row.patient_name || row.display_name || formatJid(row.jid))}</strong>
+              ${(row.patient_name || row.display_name) ? '<span style="color:#9ca3af;font-size:0.85em;margin-left:6px;">' + escHtml(formatJid(row.jid)) + '</span>' : ''}
               <span style="color:#9ca3af; font-size:0.85em; margin-left:8px;">${new Date(row.created_at).toLocaleTimeString('nl-NL')}</span>
             </div>
             <div style="margin-bottom:8px; color:#d1d5db; font-style:italic;">"${escHtml(row.inbound_message)}"</div>
@@ -533,17 +535,32 @@
         renderConversationList();
       } catch (e) { console.warn('Conversations fetch failed:', e); }
     }
+    function formatJid(jid) {
+      const phone = String(jid).replace(/@.+/, '');
+      if (phone.startsWith('31') && phone.length === 11)
+        return '+31 ' + phone[2] + ' ' + phone.slice(3,5) + ' ' + phone.slice(5,7) + ' ' + phone.slice(7,9) + ' ' + phone.slice(9);
+      return phone;
+    }
+    function modeLabel(mode) {
+      const labels = { watch: 'Observeren', suggest: 'Goedkeuring vereist', auto: 'Automatisch' };
+      return labels[mode] || mode;
+    }
     function renderConversationList() {
-      document.getElementById('conv-count').textContent = conversations.length + ' JIDs';
+      document.getElementById('conv-count').textContent = conversations.length + ' gesprekken';
       const body = document.getElementById('conv-list-body');
       body.innerHTML = conversations.map(c => {
         const lastDate = c.last_message ? new Date(c.last_message).toLocaleDateString('nl-NL', { day: '2-digit', month: '2-digit' }) : '-';
         const mode = c.mode || 'suggest';
+        const name = c.display_name || '';
+        const phone = formatJid(c.jid);
+        const displayLine = name
+          ? escHtml(name) + ' <span style="color:#aaa;font-size:10px;">' + escHtml(phone) + '</span>'
+          : '<span style="color:#888;">' + escHtml(phone) + '</span>';
         return `<div class="conv-item${activeJid === c.jid ? ' active' : ''}" onclick="openThread('${escAttr(c.jid)}')" data-jid="${escAttr(c.jid)}">
-          <div class="conv-jid">${escHtml(c.jid)}</div>
+          <div class="conv-jid" style="font-family:inherit; font-size:12px;">${displayLine}</div>
           <div class="conv-meta">
             <span>${c.message_count} berichten · ${lastDate}</span>
-            <span class="conv-mode-badge conv-mode-${mode}">${mode}</span>
+            <span class="conv-mode-badge conv-mode-${mode}">${modeLabel(mode)}</span>
           </div>
         </div>`;
       }).join('');
@@ -552,10 +569,30 @@
       activeJid = jid;
       renderConversationList();
       document.getElementById('conv-thread-header').style.display = 'flex';
-      document.getElementById('conv-thread-jid').textContent = jid;
       const conv = conversations.find(c => c.jid === jid);
+      const dispName = conv?.display_name ? conv.display_name + ' · ' + formatJid(jid) : formatJid(jid);
+      document.getElementById('conv-thread-jid').textContent = dispName;
       document.getElementById('conv-mode-select').value = conv?.mode || 'suggest';
       document.getElementById('mode-saved-msg').style.display = 'none';
+      const panel = document.getElementById('conv-patient-panel');
+      if (conv?.patient) {
+        const p = conv.patient;
+        const parts = [];
+        if (p.visitCount) parts.push(p.visitCount + ' bezoeken');
+        if (p.totalSpend) parts.push('€' + Number(p.totalSpend).toLocaleString('nl-NL'));
+        if (p.city) parts.push(p.city);
+        if (p.lastVisit) parts.push('Laatste bezoek: ' + new Date(p.lastVisit).toLocaleDateString('nl-NL'));
+        const flags = [];
+        if (p.notWelcome) flags.push('<span style="background:#f8d7da;color:#721c24;padding:2px 8px;border-radius:10px;font-size:10px;font-weight:600;">Niet welkom</span>');
+        if (p.warning) flags.push('<span style="background:#fff3cd;color:#856404;padding:2px 8px;border-radius:10px;font-size:10px;font-weight:600;">Waarschuwing</span>');
+        if (p.attention) flags.push('<span style="background:#cce5ff;color:#004085;padding:2px 8px;border-radius:10px;font-size:10px;font-weight:600;">Aandacht</span>');
+        const partsHtml = parts.map(function(t){ return '<span>' + escHtml(t) + '</span>'; }).join(' <span style="color:#a5b4fc;">&middot;</span> ');
+        panel.innerHTML = partsHtml + (flags.length ? ' &nbsp;' + flags.join(' ') : '');
+        panel.style.display = 'flex';
+      } else {
+        panel.innerHTML = '';
+        panel.style.display = 'none';
+      }
       const msgs = document.getElementById('conv-messages');
       msgs.innerHTML = '<div class="conv-empty">Laden...</div>';
       try {

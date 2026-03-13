@@ -191,3 +191,23 @@ export function getCacheStats() {
     refreshIntervalDays: 7,
   };
 }
+
+// ── Sync lookups (cache-only, voor dashboard server.js) ──────────────────
+
+/**
+ * Sync lookup van patiëntobject op basis van JID of telefoonnummer.
+ * Werkt alleen vanuit de in-memory cache (geen async API calls).
+ * Geeft null terug als de patiënt niet in de cache staat.
+ */
+export function getPatientInfoSync(jidOrPhone) {
+  const raw = String(jidOrPhone).replace(/@.+/, '');
+  const normalized = normalizePhone(raw);
+  return patientCache.get(normalized) ?? null;
+}
+
+/**
+ * Sync lookup van patiëntnaam. Verkorte versie van getPatientInfoSync.
+ */
+export function getPatientNameSync(jidOrPhone) {
+  return getPatientInfoSync(jidOrPhone)?.fullName ?? null;
+}

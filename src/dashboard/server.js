@@ -1,4 +1,5 @@
 import polka from "polka";
+import { getPatientInfoSync, getPatientNameSync } from "../integrations/clinicminds.js";
 import { readFileSync, existsSync } from "fs";
 import { fileURLToPath } from "url";
 import { dirname, join } from "path";
@@ -195,8 +196,12 @@ export function startDashboard() {
       if (!requireAuth(req, res)) return;
       const limit = parseInt(req.query?.limit ?? "50", 10);
       const entries = getRecentEntries.all(Math.min(limit, 200));
+      const enriched = entries.map(e => ({
+        ...e,
+        display_name: getPatientNameSync(e.jid),
+      }));
       res.setHeader("Content-Type", "application/json");
-      res.end(JSON.stringify(entries));
+      res.end(JSON.stringify(enriched));
     })
     .get("/api/stream", (req, res) => {
       if (!requireAuth(req, res)) return;
@@ -227,7 +232,11 @@ export function startDashboard() {
       const rows = getAllPendingSuggestions();
       const enriched = rows.map(row => {
         const context = getLastMessagesForJid.all(row.jid);
-        return { ...row, context: context.reverse() }; // reverse: oldest first
+        return {
+          ...row,
+          display_name: getPatientNameSync(row.jid),
+          context: context.reverse(), // reverse: oldest first
+        };
       });
       res.setHeader("Content-Type", "application/json");
       res.end(JSON.stringify(enriched));
@@ -314,10 +323,25 @@ export function startDashboard() {
       const modes = getConversationMode.all();
       const modeMap = Object.fromEntries(modes.map(m => [m.jid, m]));
       res.setHeader("Content-Type", "application/json");
-      res.end(JSON.stringify(list.map(c => ({
-        ...c,
-        mode: modeMap[c.jid]?.mode ?? "suggest",
-      }))));
+      res.end(JSON.stringify(list.map(c => {
+        const patient = getPatientInfoSync(c.jid);
+        return {
+          ...c,
+          mode: modeMap[c.jid]?.mode ?? "suggest",
+          display_name: patient?.fullName ?? null,
+          patient: patient ? {
+            fullName: patient.fullName,
+            visitCount: patient.visitCount,
+            totalSpend: patient.totalSpend,
+            city: patient.city,
+            lastVisit: patient.lastVisit,
+            notWelcome: patient.notWelcome,
+            blockOnlineBooking: patient.blockOnlineBooking,
+            warning: patient.warning,
+            attention: patient.attention,
+          } : null,
+        };
+      })));
     })
     .get("/api/conversations/:jid/messages", (req, res) => {
       if (!requireAuth(req, res)) return;

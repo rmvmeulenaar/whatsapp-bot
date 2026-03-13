@@ -414,6 +414,37 @@ export function startDashboard() {
       res.setHeader("Content-Type", "application/json");
       res.end(JSON.stringify(merged));
     })
+    .get("/api/healthcheck", (req, res) => {
+      // No auth required — used by smoke tests and monitoring
+      try {
+        const totalEntries = db.prepare("SELECT COUNT(*) as n FROM watch_entries").get();
+        const maskedCount = db.prepare("SELECT COUNT(*) as n FROM watch_entries WHERE jid LIKE '%***%'").get();
+        const recentEntries = db.prepare("SELECT id, jid, ts FROM watch_entries ORDER BY id DESC LIMIT 5").all();
+        const pendingCount = db.prepare("SELECT COUNT(*) as n FROM pending_suggestions WHERE status='pending'").get();
+        const patientCacheSize = db.prepare("SELECT COUNT(*) as n FROM watch_entries WHERE jid NOT LIKE '%***%'").get();
+        const fixTs = '2026-03-13T00:00:00Z'; // When JID masking fix was deployed
+        const newAfterFix = db.prepare("SELECT COUNT(*) as n FROM watch_entries WHERE ts > ?").get(fixTs);
+        const newMasked = db.prepare("SELECT COUNT(*) as n FROM watch_entries WHERE ts > ? AND jid LIKE '%***%'").get(fixTs);
+        res.setHeader("Content-Type", "application/json");
+        res.end(JSON.stringify({
+          ok: true,
+          ts: new Date().toISOString(),
+          db: {
+            total_entries: totalEntries.n,
+            masked_jids_total: maskedCount.n,
+            pending_suggestions: pendingCount.n,
+            entries_after_fix: newAfterFix.n,
+            masked_after_fix: newMasked.n,
+            recent_jids: recentEntries.map(e => ({ id: e.id, jid: e.jid, masked: e.jid.includes('***') })),
+          },
+          status: "online",
+        }));
+      } catch (err) {
+        res.statusCode = 500;
+        res.setHeader("Content-Type", "application/json");
+        res.end(JSON.stringify({ ok: false, error: err.message }));
+      }
+    })
     .listen(PORT, (err) => {
       if (err) {
         console.error("Dashboard failed to start:", err);

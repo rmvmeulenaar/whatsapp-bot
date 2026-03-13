@@ -273,4 +273,70 @@ export function clearPendingBooking(jid) {
   clearPendingBookingStmt.run({ jid });
 }
 
+// === Phase 9: DASH-04..07 prepared statements ===
+
+// DASH-04: list all JIDs with message metadata
+export const getConversationList = db.prepare(`
+  SELECT
+    jid,
+    COUNT(*) as message_count,
+    MAX(ts) as last_message,
+    MIN(ts) as first_message
+  FROM watch_entries
+  GROUP BY jid
+  ORDER BY last_message DESC
+  LIMIT 200
+`);
+
+// DASH-04: all messages for one JID (chat thread)
+export const getConversationMessages = db.prepare(`
+  SELECT id, ts, inbound, proposed_reply, action, intent, node_trace, latency_ms
+  FROM watch_entries
+  WHERE jid = ?
+  ORDER BY ts ASC
+`);
+
+// DASH-05: all rows from conversations table (real JIDs + modes)
+export const getConversationMode = db.prepare(`
+  SELECT jid, mode, takeover_until FROM conversations ORDER BY jid
+`);
+
+// DASH-06: daily stats from watch_entries (ts is ISO string — use date(ts) directly)
+export const getDailyWatchMetrics = db.prepare(`
+  SELECT
+    date(ts) as day,
+    COUNT(*) as total_messages,
+    ROUND(AVG(latency_ms)) as avg_latency_ms,
+    SUM(CASE WHEN proposed_reply IS NOT NULL THEN 1 ELSE 0 END) as with_reply,
+    SUM(CASE WHEN safety_pass = 0 THEN 1 ELSE 0 END) as safety_fails
+  FROM watch_entries
+  GROUP BY day
+  ORDER BY day DESC
+  LIMIT 7
+`);
+
+// DASH-06: daily approval stats from pending_suggestions
+// NOTE: created_at is Unix milliseconds — use date(created_at / 1000, 'unixepoch')
+export const getDailySuggestionMetrics = db.prepare(`
+  SELECT
+    date(created_at / 1000, 'unixepoch') as day,
+    COUNT(*) as total_suggestions,
+    SUM(CASE WHEN status = 'approved' THEN 1 ELSE 0 END) as approved,
+    SUM(CASE WHEN status = 'rejected' THEN 1 ELSE 0 END) as rejected
+  FROM pending_suggestions
+  WHERE status IN ('approved', 'rejected', 'superseded', 'pending')
+  GROUP BY day
+  ORDER BY day DESC
+  LIMIT 7
+`);
+
+// DASH-07: last 3 messages for a JID (for pending context enrichment)
+export const getLastMessagesForJid = db.prepare(`
+  SELECT inbound, proposed_reply, ts, action, intent
+  FROM watch_entries
+  WHERE jid = ?
+  ORDER BY ts DESC
+  LIMIT 3
+`);
+
 export { db };

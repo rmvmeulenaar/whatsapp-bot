@@ -142,7 +142,7 @@ export async function runGraph(jid, inboundText) {
   try {
     result = await graph.invoke(initialState);
   } catch (err) {
-    logEvent({ type: "graph_error", jid: maskPhone(jid), error: err.message });
+    logEvent({ type: "graph_error", jid: jid, error: err.message });
     result = {
       output: null,
       error: err.message,
@@ -177,17 +177,17 @@ export async function runGraph(jid, inboundText) {
       try {
         const sendResult = await sendText(socket, jid, result.output);
         if (sendResult && sendResult.sent === false) {
-          logEvent({ type: 'auto_send_rate_limited', jid: maskPhone(jid), reason: sendResult.reason });
+          logEvent({ type: 'auto_send_rate_limited', jid: jid, reason: sendResult.reason });
           action = 'rate_limited';
         } else {
           action = 'auto_reply';
         }
       } catch (err) {
-        logEvent({ type: 'auto_send_failed', jid: maskPhone(jid), error: err.message });
+        logEvent({ type: 'auto_send_failed', jid: jid, error: err.message });
         action = 'send_failed';
       }
     } else {
-      logEvent({ type: 'send_error', jid: maskPhone(jid), reason: 'no_socket' });
+      logEvent({ type: 'send_error', jid: jid, reason: 'no_socket' });
       action = 'no_socket';
     }
   } else if (mode === 'auto' && result.error?.startsWith('guardrail')) {
@@ -231,7 +231,7 @@ export async function runGraph(jid, inboundText) {
   // Build watch entry
   const entry = {
     ts,
-    jid: maskPhone(jid),
+    jid: jid,
     intent: result.intent?.labels?.join(",") ?? "unknown",
     inbound: inboundText,
     inbound_classification: "GROEN",
